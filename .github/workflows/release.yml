@@ -1,0 +1,55 @@
+name: Build and release
+
+# Push a tag like v1.0.0 to build the self-contained .exe on a real Windows
+# runner and attach it to a GitHub Release - that's the whole point of this:
+# nobody (including you) needs VS Code or the .NET SDK installed just to get
+# the exe. workflow_dispatch lets you trigger a test build by hand without
+# tagging anything, useful while you're still iterating before v1.0.0.
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      # -r/-p flags already match what's in GamingStackGUI.csproj
+      # (SelfContained/PublishSingleFile/etc.) - this just triggers it on CI.
+      - name: Publish self-contained exe
+        run: dotnet publish GamingStackGUI.csproj -c Release -r win-x64
+
+      - name: Locate published exe
+        id: locate
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem -Recurse -Filter "GamingStackGUI.exe" -Path "bin/Release" | Select-Object -First 1
+          if (-not $exe) { throw "Published exe not found - did the publish step fail?" }
+          "exePath=$($exe.FullName)" >> $env:GITHUB_OUTPUT
+
+      # Always uploaded as a workflow artifact (visible on every run, tag or
+      # not) so a manual workflow_dispatch run gives you something to
+      # download and test before you commit to tagging a real release.
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: GamingStack-${{ github.ref_name }}
+          path: ${{ steps.locate.outputs.exePath }}
+
+      # Only attached to an actual GitHub Release when the trigger was a
+      # version tag - a manual dispatch run doesn't create/publish a release.
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.locate.outputs.exePath }}
+          generate_release_notes: true

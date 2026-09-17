@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk.WindowsDesktop">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>GamingStackGUI</AssemblyName>
+    <RootNamespace>GamingStackGUI</RootNamespace>
+
+    <!-- Debug uses asInvoker so `dotnet run`/F5 debugging works without hitting
+         "the requested operation requires elevation" (CreateProcess can't silently
+         elevate a child process - only ShellExecute/double-click can). Release
+         requests real admin rights, since the installer stage needs them. -->
+    <ApplicationManifest Condition="'$(Configuration)'=='Debug'">App.Debug.manifest</ApplicationManifest>
+    <ApplicationManifest Condition="'$(Configuration)'!='Debug'">App.manifest</ApplicationManifest>
+
+    <!-- Publish settings: dotnet publish -c Release -r win-x64 produces one .exe -->
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Lets us query real CPU/RAM/GPU/disk info for the fake BIOS screen -->
+    <PackageReference Include="System.Management" Version="8.0.0" />
+    <!-- Registry access for the gaming tweaks (Game Mode, HAGS) -->
+    <PackageReference Include="Microsoft.Win32.Registry" Version="5.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Embedded properly - no separate files to lose on a different machine -->
+    <EmbeddedResource Include="Resources\win95.wav" />
+    <EmbeddedResource Include="Resources\wallpaper.jpg" />
+  </ItemGroup>
+</Project>

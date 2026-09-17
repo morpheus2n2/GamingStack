@@ -15,13 +15,26 @@ namespace GamingStackGUI
 {
     /// <summary>
     /// Flow: Bios -> Boot (original animation) -> Desktop (placeholder) -> Terminal
-    /// (real installer, via InstallerEngine).
+    /// (interactive install wizard, then the real installer, via InstallerEngine).
     /// Pressing Delete during the Bios stage detours into a joke Bsod stage for a few
     /// seconds, then carries on into Boot as normal.
     /// </summary>
     public class MainForm : Form
     {
         private enum Stage { Bios, Bsod, Boot, Desktop, Terminal }
+
+        // The interactive Q&A inside the Terminal stage, before/instead of the real
+        // install run. See HandleWizardKey for the full flow between these.
+        private enum WizardPhase
+        {
+            ConfirmAll,          // "Install everything shown? Y/N"
+            ChooseIndividually,  // "Want to choose what's installed? Y/N"
+            PerApp,              // asking Y/N for one catalog entry at a time
+            ConfirmQuit,         // "Just want to quit? Y/N"
+            EasterEgg,           // declined everything - a little joke, then Farewell
+            Installing,          // InstallerEngine is actually running
+            Farewell             // final thank-you screen (reached from Installing or EasterEgg)
+        }
 
         private const int BiosMinHoldMs = 13000;
         private const int BsodHoldMs = 7000;
@@ -30,10 +43,12 @@ namespace GamingStackGUI
         private const int MemCountDurationMs = 3000;
         private const int DesktopHoldMs = 7000;
         private const int TerminalOpenMs = 400;
+        private const int EasterEggHoldMs = 5000;
         private const double CloudSpeedMultiplier = 1.8;
 
         private readonly System.Windows.Forms.Timer _timer = new() { Interval = 33 };
         private readonly Stopwatch _stageWatch = new();
+        private readonly Stopwatch _phaseWatch = new();
 
         private Stage _stage = Stage.Bios;
 
@@ -59,13 +74,18 @@ namespace GamingStackGUI
         private Image? _wallpaper;
 
         private readonly Font _mono = new("Consolas", 14f, FontStyle.Regular);
+        private readonly Font _monoSmall = new("Consolas", 12f, FontStyle.Regular);
         private readonly Font _monoLarge = new("Consolas", 22f, FontStyle.Bold);
 
-        // ---- installer ----
+        // ---- installer + wizard ----
         private readonly InstallerEngine _installer = new();
         private readonly List<string> _terminalLines = new();
         private readonly object _terminalLock = new();
-        private bool _installStarted;
+
+        private WizardPhase _wizardPhase = WizardPhase.ConfirmAll;
+        private readonly List<AppEntry> _selectedApps = new();
+        private int _perAppIndex;
+        private bool?[] _perAppDecisions = Array.Empty<bool?>();
 
         public MainForm()
         {
@@ -82,6 +102,11 @@ namespace GamingStackGUI
                     if (_terminalLines.Count > 300) _terminalLines.RemoveAt(0);
                 }
             };
+            _installer.OnFinished += () =>
+            {
+                _wizardPhase = WizardPhase.Farewell;
+                _phaseWatch.Restart();
+            };
 
             _timer.Tick += (_, _) =>
             {
@@ -94,14 +119,19 @@ namespace GamingStackGUI
         {
             base.OnLoad(e);
 
-            // Maximized+borderless can size itself to the work area (or misbehave on
-            // scaled/multi-monitor setups) instead of the real screen bounds, which is
-            // what was clipping the taskbar off the edge. Set explicit bounds to the
-            // actual physical screen instead of relying on WindowState.Maximized.
-            var screen = Screen.FromControl(this);
+            // Borderless + WindowState.Maximized doesn't reliably cover the entire
+            // physical screen on every DPI/multi-monitor setup, and separately, the
+            // real Windows taskbar is an "always on top" window that can still render
+            // above our own drawn one at the bottom of the screen even when our bounds
+            // are correct. Fix both: size explicitly to the screen the user is actually
+            // on (based on where the cursor is, which is more reliable than the
+            // window's undefined initial position), and mark the form TopMost so it
+            // sits above the real taskbar instead of getting cut off behind it.
+            var screen = Screen.FromPoint(Cursor.Position);
             StartPosition = FormStartPosition.Manual;
             WindowState = FormWindowState.Normal;
             Bounds = screen.Bounds;
+            TopMost = true;
 
             LoadEmbeddedSound();
             LoadEmbeddedWallpaper();
@@ -341,24 +371,98 @@ namespace GamingStackGUI
                     break;
 
                 case Stage.Terminal:
-                    if (!_installStarted && _stageWatch.ElapsedMilliseconds >= TerminalOpenMs)
+                    if (_wizardPhase == WizardPhase.EasterEgg &&
+                        _phaseWatch.ElapsedMilliseconds >= EasterEggHoldMs)
                     {
-                        _installStarted = true;
-                        _ = RunInstallerSafelyAsync();
+                        _wizardPhase = WizardPhase.Farewell;
+                        _phaseWatch.Restart();
                     }
                     break;
             }
+        }
+
+        // ---------- install wizard ----------
+
+        private void StartInstall()
+        {
+            _wizardPhase = WizardPhase.Installing;
+            _phaseWatch.Restart();
+            _ = RunInstallerSafelyAsync();
         }
 
         private async Task RunInstallerSafelyAsync()
         {
             try
             {
-                await _installer.RunAsync();
+                await _installer.RunAsync(_selectedApps);
             }
             catch (Exception ex)
             {
                 lock (_terminalLock) { _terminalLines.Add($"FATAL: {ex.Message}"); }
+                _wizardPhase = WizardPhase.Farewell;
+                _phaseWatch.Restart();
+            }
+        }
+
+        private void HandleWizardKey(Keys key)
+        {
+            bool? yn = key switch
+            {
+                Keys.Y => true,
+                Keys.N => false,
+                _ => null
+            };
+            if (yn == null) return;
+            var answer = yn.Value;
+
+            switch (_wizardPhase)
+            {
+                case WizardPhase.ConfirmAll:
+                    if (answer)
+                    {
+                        _selectedApps.Clear();
+                        _selectedApps.AddRange(InstallerEngine.Catalog);
+                        StartInstall();
+                    }
+                    else
+                    {
+                        _wizardPhase = WizardPhase.ChooseIndividually;
+                    }
+                    break;
+
+                case WizardPhase.ChooseIndividually:
+                    if (answer)
+                    {
+                        _selectedApps.Clear();
+                        _perAppIndex = 0;
+                        _perAppDecisions = new bool?[InstallerEngine.Catalog.Count];
+                        _wizardPhase = WizardPhase.PerApp;
+                    }
+                    else
+                    {
+                        _wizardPhase = WizardPhase.ConfirmQuit;
+                    }
+                    break;
+
+                case WizardPhase.PerApp:
+                    _perAppDecisions[_perAppIndex] = answer;
+                    if (answer) _selectedApps.Add(InstallerEngine.Catalog[_perAppIndex]);
+                    _perAppIndex++;
+                    if (_perAppIndex >= InstallerEngine.Catalog.Count)
+                        StartInstall();
+                    break;
+
+                case WizardPhase.ConfirmQuit:
+                    if (answer)
+                    {
+                        Close();
+                    }
+                    else
+                    {
+                        _wizardPhase = WizardPhase.EasterEgg;
+                        _phaseWatch.Restart();
+                    }
+                    break;
             }
         }
 
@@ -662,7 +766,7 @@ namespace GamingStackGUI
             g.DrawString(clock, _mono, Brushes.Black, Width - clockSize.Width - 20, Height - barHeight + 8);
         }
 
-        // ---- Terminal (opens on top of the desktop, runs the real installer) ----
+        // ---- Terminal (opens on top of the desktop, runs the interactive wizard then the installer) ----
 
         private void PaintTerminal(Graphics g)
         {
@@ -675,7 +779,7 @@ namespace GamingStackGUI
             var eased = 1 - Math.Pow(1 - openProgress, 3);
 
             var fullW = (int)(Width * 0.7);
-            var fullH = (int)(Height * 0.6);
+            var fullH = (int)(Height * 0.62);
             var fullX = (Width - fullW) / 2;
             var fullY = (Height - fullH) / 2;
 
@@ -695,6 +799,77 @@ namespace GamingStackGUI
             g.FillRectangle(titleBrush, fullX, fullY, fullW, titleHeight);
             g.DrawString("GamingStack Installer", _mono, Brushes.Gainsboro, fullX + 8, fullY + 4);
 
+            switch (_wizardPhase)
+            {
+                case WizardPhase.Installing:
+                    DrawInstallerLog(g, fullX, fullY, fullW, fullH, titleHeight, elapsed);
+                    break;
+                case WizardPhase.EasterEgg:
+                    DrawEasterEgg(g, fullX, fullY, fullW, fullH, titleHeight, _phaseWatch.ElapsedMilliseconds);
+                    break;
+                case WizardPhase.Farewell:
+                    DrawFarewell(g, fullX, fullY, fullW, fullH, titleHeight);
+                    break;
+                default:
+                    DrawWizard(g, fullX, fullY, fullW, fullH, titleHeight);
+                    break;
+            }
+        }
+
+        private void DrawWizard(Graphics g, int fullX, int fullY, int fullW, int fullH, int titleHeight)
+        {
+            var catalog = InstallerEngine.Catalog;
+            var contentX = fullX + 16;
+            var contentTop = fullY + titleHeight + 10;
+            const int lineHeight = 18;
+
+            g.DrawString("GamingStack will install the following:", _mono, Brushes.Gainsboro, contentX, contentTop);
+            var listTop = contentTop + lineHeight + 8;
+
+            var half = (int)Math.Ceiling(catalog.Count / 2.0);
+            var colWidth = (fullW - 32) / 2;
+
+            for (int i = 0; i < catalog.Count; i++)
+            {
+                var col = i < half ? 0 : 1;
+                var row = i < half ? i : i - half;
+                var lx = contentX + col * colWidth;
+                var ly = listTop + row * lineHeight;
+
+                var marker = "   ";
+                var brush = Brushes.Gainsboro;
+
+                if (i < _perAppDecisions.Length && _perAppDecisions[i].HasValue)
+                {
+                    var got = _perAppDecisions[i]!.Value;
+                    marker = got ? "[x]" : "[ ]";
+                    brush = got ? Brushes.LightGreen : Brushes.Gray;
+                }
+                else if (_wizardPhase == WizardPhase.PerApp && i == _perAppIndex)
+                {
+                    marker = "-->";
+                    brush = Brushes.Gold;
+                }
+
+                g.DrawString($"{marker} {catalog[i].FriendlyName}", _monoSmall, brush, lx, ly);
+            }
+
+            var promptTop = listTop + half * lineHeight + 16;
+            string prompt = _wizardPhase switch
+            {
+                WizardPhase.ConfirmAll => "Install everything shown above?   [Y] Yes    [N] No",
+                WizardPhase.ChooseIndividually => "Would you like to choose what's installed?   [Y] Yes    [N] No",
+                WizardPhase.PerApp => $"Install \"{catalog[_perAppIndex].FriendlyName}\"?   [Y] Yes    [N] Skip",
+                WizardPhase.ConfirmQuit => "No changes made yet. Just want to quit?   [Y] Yes    [N] No",
+                _ => ""
+            };
+
+            using var promptFont = new Font("Consolas", 14f, FontStyle.Bold);
+            g.DrawString(prompt, promptFont, Brushes.Gold, contentX, promptTop);
+        }
+
+        private void DrawInstallerLog(Graphics g, int fullX, int fullY, int fullW, int fullH, int titleHeight, long elapsed)
+        {
             string[] linesSnapshot;
             lock (_terminalLock) { linesSnapshot = _terminalLines.ToArray(); }
 
@@ -717,7 +892,7 @@ namespace GamingStackGUI
             var blink = (elapsed / 500) % 2 == 0;
             if (blink)
             {
-                var cursorX = fullX + 16;
+                float cursorX = fullX + 16;
                 var cursorY = ty - lineHeight;
                 if (visible.Length > 0)
                     cursorX += g.MeasureString(visible[^1], _mono).Width;
@@ -726,6 +901,141 @@ namespace GamingStackGUI
 
                 g.FillRectangle(Brushes.LimeGreen, cursorX, cursorY, 10, 16);
             }
+        }
+
+        // A little original mascot for the "didn't want to choose, didn't want to quit
+        // either" branch - a wobbling floppy disk with a speech bubble. Fully original
+        // shapes (rectangles/ellipses), not a reproduction of any real character.
+        private void DrawEasterEgg(Graphics g, int fullX, int fullY, int fullW, int fullH, int titleHeight, long elapsedMs)
+        {
+            var contentTop = fullY + titleHeight;
+            var contentHeight = fullH - titleHeight;
+            var centerX = fullX + fullW / 2;
+            var bob = (float)Math.Sin(elapsedMs / 250.0) * 6f;
+
+            const int diskW = 90, diskH = 100;
+            var diskX = centerX - diskW / 2;
+            var diskY = contentTop + contentHeight / 2 - diskH / 2 + 30 + (int)bob;
+
+            // body
+            using var bodyBrush = new SolidBrush(Color.FromArgb(40, 40, 200));
+            g.FillRectangle(bodyBrush, diskX, diskY, diskW, diskH);
+            g.DrawRectangle(Pens.Gainsboro, diskX, diskY, diskW, diskH);
+
+            // metal shutter
+            using var shutterBrush = new SolidBrush(Color.FromArgb(200, 200, 210));
+            g.FillRectangle(shutterBrush, diskX + 14, diskY, diskW - 28, 26);
+
+            // label
+            using var labelBrush = new SolidBrush(Color.FromArgb(235, 235, 245));
+            g.FillRectangle(labelBrush, diskX + 10, diskY + 36, diskW - 20, 36);
+
+            // face on the label
+            using var eyePen = new Pen(Color.Black, 3);
+            g.FillEllipse(Brushes.Black, diskX + 24, diskY + 46, 6, 6);
+            g.FillEllipse(Brushes.Black, diskX + diskW - 30, diskY + 46, 6, 6);
+            g.DrawArc(eyePen, diskX + 22, diskY + 52, diskW - 44, 16, 0, 180);
+
+            // speech bubble
+            using var bubbleFont = new Font("Consolas", 13f, FontStyle.Regular);
+            const string joke = "Big decisions, huh?\nI'm just a floppy disk and\neven I can commit to 1.44MB.";
+            var jokeSize = g.MeasureString(joke, bubbleFont);
+            var bubbleW = jokeSize.Width + 30;
+            var bubbleH = jokeSize.Height + 24;
+            var bubbleX = centerX - bubbleW / 2;
+            var bubbleY = diskY - bubbleH - 30;
+
+            using var bubbleBrush = new SolidBrush(Color.White);
+            g.FillRectangle(bubbleBrush, bubbleX, bubbleY, bubbleW, bubbleH);
+            g.DrawRectangle(Pens.Black, bubbleX, bubbleY, bubbleW, bubbleH);
+
+            // little pointer triangle from bubble down toward the disk
+            var tipX = centerX;
+            var tipY = bubbleY + bubbleH;
+            var tri = new[]
+            {
+                new PointF(tipX - 10, tipY),
+                new PointF(tipX + 10, tipY),
+                new PointF(tipX, tipY + 14)
+            };
+            g.FillPolygon(Brushes.White, tri);
+            g.DrawPolygon(Pens.Black, tri);
+
+            g.DrawString(joke, bubbleFont, Brushes.Black, bubbleX + 15, bubbleY + 12);
+        }
+
+        // The sign-off screen, styled like an old text-mode "installation complete"
+        // box - reached either after a real install finishes or after the easter egg.
+        private void DrawFarewell(Graphics g, int fullX, int fullY, int fullW, int fullH, int titleHeight)
+        {
+            using var textFont = new Font("Consolas", 13f, FontStyle.Regular);
+            using var signFont = new Font("Consolas", 13f, FontStyle.Bold);
+
+            var lines = new[]
+            {
+                ("Thank you for using my Installer stack on your", textFont, Brushes.LimeGreen),
+                ("Shiny PC, I hope you have lots of fun playing.", textFont, Brushes.LimeGreen),
+                ("", textFont, Brushes.LimeGreen),
+                ("Yours, Morpheus2n2", signFont, Brushes.Gold)
+            };
+
+            const int lineHeight = 24;
+            var maxTextWidth = lines.Max(l => g.MeasureString(l.Item1, l.Item2).Width);
+
+            const int glyphAreaHeight = 60;
+            var boxWidth = Math.Min(fullW - 60, (int)maxTextWidth + 60);
+            var boxHeight = lines.Length * lineHeight + glyphAreaHeight + 30;
+
+            var boxX = fullX + (fullW - boxWidth) / 2;
+            var boxY = fullY + titleHeight + Math.Max(10, (fullH - titleHeight - boxHeight) / 2);
+
+            using var borderPen = new Pen(Color.Cyan, 2);
+            g.DrawRectangle(borderPen, boxX, boxY, boxWidth, boxHeight);
+            // small corner accents, ASCII-box-drawing style
+            const int accent = 16;
+            g.DrawLine(borderPen, boxX, boxY, boxX + accent, boxY);
+            g.DrawLine(borderPen, boxX, boxY, boxX, boxY + accent);
+            g.DrawLine(borderPen, boxX + boxWidth, boxY, boxX + boxWidth - accent, boxY);
+            g.DrawLine(borderPen, boxX + boxWidth, boxY, boxX + boxWidth, boxY + accent);
+            g.DrawLine(borderPen, boxX, boxY + boxHeight, boxX + accent, boxY + boxHeight);
+            g.DrawLine(borderPen, boxX, boxY + boxHeight, boxX, boxY + boxHeight - accent);
+            g.DrawLine(borderPen, boxX + boxWidth, boxY + boxHeight, boxX + boxWidth - accent, boxY + boxHeight);
+            g.DrawLine(borderPen, boxX + boxWidth, boxY + boxHeight, boxX + boxWidth, boxY + boxHeight - accent);
+
+            DrawPixelHeart(g, boxX + boxWidth / 2 - 12, boxY + 16);
+
+            var ty = boxY + glyphAreaHeight;
+            foreach (var (text, font, brush) in lines)
+            {
+                if (text.Length > 0)
+                {
+                    var w = g.MeasureString(text, font).Width;
+                    g.DrawString(text, font, brush, boxX + (boxWidth - w) / 2, ty);
+                }
+                ty += lineHeight;
+            }
+        }
+
+        // A small original pixel-art heart - "have fun playing" needed a friendly
+        // little glyph and this is generic/geometric enough to carry no resemblance
+        // to any specific character or brand.
+        private static void DrawPixelHeart(Graphics g, int x, int y)
+        {
+            using var brush = new SolidBrush(Color.FromArgb(255, 90, 140));
+            const int p = 4; // pixel size
+            int[,] shape =
+            {
+                {0,1,1,0,1,1,0},
+                {1,1,1,1,1,1,1},
+                {1,1,1,1,1,1,1},
+                {0,1,1,1,1,1,0},
+                {0,0,1,1,1,0,0},
+                {0,0,0,1,0,0,0}
+            };
+            for (int row = 0; row < shape.GetLength(0); row++)
+                for (int col = 0; col < shape.GetLength(1); col++)
+                    if (shape[row, col] == 1)
+                        g.FillRectangle(brush, x + col * p, y + row * p, p, p);
         }
 
         // ---------- misc ----------
@@ -740,6 +1050,8 @@ namespace GamingStackGUI
                 _stageWatch.Restart();
                 return;
             }
+
+            if (_stage == Stage.Terminal) HandleWizardKey(e.KeyCode);
 
             if (e.KeyCode == Keys.Escape) Close();
         }

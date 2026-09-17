@@ -24,14 +24,33 @@ lose. Download it, run it, walk away.
   assets are used, see [Credits & copyright](#credits--copyright))
 - **Desktop stage** with a taskbar (live clock), desktop icons, and a
   wallpaper
-- **Real installer**, running inside a terminal window that animates open:
-  installs a full app stack via `winget` with retries, handles a couple of
-  apps that need manual download/install, and applies a few gaming-related
-  tweaks (Game Mode, hardware-accelerated GPU scheduling, High Performance
-  power plan)
-- **Easter egg** — press <kbd>Delete</kbd> during the BIOS screen
+- **Interactive install wizard**, running inside a terminal window that
+  animates open: shows the full app list with friendly names, then asks
+  whether to install everything, pick items one by one, or bail out —
+  see [How the install works](#how-the-install-works) below
+- **Real installer**: installs the selected apps via `winget` with
+  retries, handles a couple of apps that need manual download/install,
+  and applies a few gaming-related tweaks (Game Mode, hardware-accelerated
+  GPU scheduling, High Performance power plan)
+- **Easter eggs** — press <kbd>Delete</kbd> during the BIOS screen for a
+  joke blue screen, or decline every install option in the wizard for a
+  small surprise
 - Runs as a single self-contained `.exe` — no separate files to install
   alongside it
+
+## How the install works
+
+Once the boot sequence finishes, the terminal window shows the full list
+of what's on offer and asks:
+
+1. **Install everything shown above? [Y/N]** — `Y` installs the full list.
+   `N` moves to the next question.
+2. **Would you like to choose what's installed? [Y/N]** — `Y` walks
+   through every item one at a time (`Y` installs it, `N` skips it),
+   showing a running checklist as you go. `N` moves to the next question.
+3. **Just want to quit? [Y/N]** — `Y` closes the app. `N` leads to a
+   small easter egg, then the same sign-off screen you'd see after a
+   real install.
 
 ## What it installs
 
@@ -40,10 +59,13 @@ Games, Playnite to tie them all together), streaming/recording tools (OBS
 Studio, Streamlabs, Medal, Voicemeeter Banana), monitoring/utility apps
 (HWiNFO, CPU-Z, Speccy, CrystalDiskInfo, Process Lasso), and general
 utilities (VS Code, PowerShell, Office, PowerToys, Python, VLC, 7-Zip).
-The full list — and how to change it — is in `InstallerEngine.cs`.
+The full list — and how to change it — is the `Catalog` in
+`InstallerEngine.cs`.
 
 A couple of apps with no reliable `winget` package (Hyte Nexus, L-Connect 3)
-are downloaded and installed directly instead.
+are downloaded and installed directly instead, but sit in the same
+pickable list as everything else so you can skip them if you don't own
+that hardware.
 
 ## Requirements
 
@@ -92,6 +114,7 @@ expected.
 
 - [x] Retro boot sequence (BIOS, boot animation, desktop, terminal)
 - [x] Real installer stack (winget loop, manual installer fallback, tweaks)
+- [x] Interactive install wizard (install all / pick individually / quit)
 - [ ] Real boot animation assets (currently original placeholder artwork)
 - [ ] Installation log viewer / summary screen
 

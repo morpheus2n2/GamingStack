@@ -4,7 +4,43 @@ Nothing's been tagged as a release yet, so this is grouped by development
 milestone rather than version numbers for now — worth switching to proper
 [semantic versioning](https://semver.org/) once you start cutting releases.
 
-## Current build — C# GUI rewrite (all-in-one)
+## Current build — interactive install wizard + taskbar fix
+
+### Added
+- **Interactive install wizard** in the terminal stage, replacing the old
+  "just runs everything automatically" behavior:
+  - Shows the full catalog with friendly names (no raw winget IDs) and
+    asks "Install everything shown above? [Y/N]"
+  - Answering No offers "Would you like to choose what's installed?
+    [Y/N]" — Yes walks through every item one at a time asking Y (install)
+    or N (skip), with a live checklist showing decisions made so far
+  - Answering No to choosing individually asks "Just want to quit? [Y/N]"
+    — Yes closes the app; No leads to a small easter egg (see below)
+  - Manual installers (Hyte Nexus, L-Connect 3) are now part of the same
+    pickable catalog as the winget apps, so people without that specific
+    hardware can skip them instead of always downloading them
+  - `InstallerEngine.RunAsync` now takes the selected list as a parameter
+    instead of always installing a hardcoded set; a catalog entry now
+    carries a friendly display name alongside its winget ID / manual URL
+    (`AppEntry`/`AppKind` in `InstallerEngine.cs`)
+- **Easter egg**: declining to install anything *and* declining to quit
+  brings up a wobbling original floppy-disk mascot with a joke speech
+  bubble about indecision, shown for 5 seconds
+- **Farewell screen**: a styled ASCII-bordered sign-off message, shown
+  both after a real install run finishes and after the easter egg —
+  "Thank you for using my Installer stack..."
+- winget availability is now checked once per run rather than aborting
+  the whole thing before manual installers even got a chance to run
+
+### Fixed
+- Taskbar (and the rest of the fake desktop) rendering partly off-screen:
+  the form is now positioned using `Screen.FromPoint(Cursor.Position)`
+  (more reliable than the window's undefined initial position on
+  multi-monitor setups) and marked `TopMost`, since the real Windows
+  taskbar is an always-on-top window that can otherwise render above our
+  own drawn one even when our bounds are correct
+
+## Previous build — C# GUI rewrite (all-in-one)
 
 Everything now lives in a single WinForms process. No PowerShell, no
 external asset files.
@@ -40,6 +76,17 @@ external asset files.
   and the Debug-vs-Release elevation behavior
 
 ### Fixed
+- Build error (`CS0266`): the terminal cursor's x-position was declared
+  `var` (inferring `int`) then had a `float` (`MeasureString(...).Width`)
+  added to it via `+=`, which doesn't implicitly convert - it's `float
+  cursorX` now
+- Removed the `<windowsSettings>` DPI block from both app manifests
+  (`WFAC010`) - high-DPI is already set via `Application.SetHighDpiMode`
+  in `Program.cs`, and declaring it in both places is what triggered the
+  warning
+- Switched the csproj's SDK from `Microsoft.NET.Sdk.WindowsDesktop` to
+  plain `Microsoft.NET.Sdk` (`NETSDK1137`) - the WindowsDesktop SDK is
+  no longer needed on current .NET SDKs when `UseWindowsForms` is set
 - BIOS logo enlarged (was too small)
 - BSOD text now centers as a block on screen with each line left-justified
   within it, instead of overlapping at fixed coordinates

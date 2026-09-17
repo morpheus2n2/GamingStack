@@ -10,12 +10,30 @@ using Microsoft.Win32;
 
 namespace GamingStackGUI
 {
+    public enum AppKind { Winget, Manual }
+
+    /// <summary>
+    /// One installable thing, with a human-friendly name for display in the wizard
+    /// (the winget ID / manual URL are what actually gets run, kept separate so the
+    /// UI never has to show raw package IDs to the user).
+    /// </summary>
+    public class AppEntry
+    {
+        public required string FriendlyName { get; init; }
+        public required AppKind Kind { get; init; }
+        public string? WingetId { get; init; }
+        public string? ManualFileName { get; init; }
+        public string? ManualUrl { get; init; }
+    }
+
     /// <summary>
     /// The actual install stack, ported directly from the earlier PowerShell version -
     /// same behavior (retries, manual-installer fallback chain, tweaks), just written
     /// as C# so it runs in-process instead of shelling out to a script.
     /// Fires <see cref="OnLog"/> for every line so the UI can print it into the
-    /// terminal window without this class knowing anything about WinForms.
+    /// terminal window without this class knowing anything about WinForms, and takes
+    /// the list of what to actually install as a parameter to <see cref="RunAsync"/> -
+    /// the wizard in MainForm decides that, this class just does the work.
     /// </summary>
     public class InstallerEngine
     {
@@ -24,51 +42,53 @@ namespace GamingStackGUI
 
         private static readonly HttpClient Http = new();
 
-        // winget package IDs to install - edit this list to customise.
-        private static readonly string[] AppsToInstall =
+        // The full catalog the wizard offers. Edit here to add/remove/rename what's
+        // on offer - friendly names are what the user sees, everything else is what
+        // actually gets run.
+        public static readonly IReadOnlyList<AppEntry> Catalog = new List<AppEntry>
         {
             // Launchers / core
-            "Discord.Discord",
-            "Valve.Steam",
-            "Ubisoft.Connect",
-            "EpicGames.EpicGamesLauncher",
-            "GOG.Galaxy",
-            "Amazon.Games",
-            "Blizzard.BattleNet",
-            "Playnite.Playnite",              // unifies all the above into one library
+            new() { FriendlyName = "Discord", Kind = AppKind.Winget, WingetId = "Discord.Discord" },
+            new() { FriendlyName = "Steam", Kind = AppKind.Winget, WingetId = "Valve.Steam" },
+            new() { FriendlyName = "Ubisoft Connect", Kind = AppKind.Winget, WingetId = "Ubisoft.Connect" },
+            new() { FriendlyName = "Epic Games Launcher", Kind = AppKind.Winget, WingetId = "EpicGames.EpicGamesLauncher" },
+            new() { FriendlyName = "GOG Galaxy", Kind = AppKind.Winget, WingetId = "GOG.Galaxy" },
+            new() { FriendlyName = "Amazon Games", Kind = AppKind.Winget, WingetId = "Amazon.Games" },
+            new() { FriendlyName = "Battle.net", Kind = AppKind.Winget, WingetId = "Blizzard.BattleNet" },
+            new() { FriendlyName = "Playnite (unifies the above)", Kind = AppKind.Winget, WingetId = "Playnite.Playnite" },
 
             // GPU / drivers / monitoring
-            "Nvidia.App",
-            "REALiX.HWiNFO",
-            "CPUID.CPU-Z",
-            "Piriform.Speccy",
-            "CrystalDewWorld.CrystalDiskInfo",
-            "BitSum.ProcessLasso",
+            new() { FriendlyName = "NVIDIA App", Kind = AppKind.Winget, WingetId = "Nvidia.App" },
+            new() { FriendlyName = "HWiNFO", Kind = AppKind.Winget, WingetId = "REALiX.HWiNFO" },
+            new() { FriendlyName = "CPU-Z", Kind = AppKind.Winget, WingetId = "CPUID.CPU-Z" },
+            new() { FriendlyName = "Speccy", Kind = AppKind.Winget, WingetId = "Piriform.Speccy" },
+            new() { FriendlyName = "CrystalDiskInfo", Kind = AppKind.Winget, WingetId = "CrystalDewWorld.CrystalDiskInfo" },
+            new() { FriendlyName = "Process Lasso", Kind = AppKind.Winget, WingetId = "BitSum.ProcessLasso" },
 
             // Streaming / recording / audio
-            "Streamlabs.StreamlabsOBS",
-            "OBSProject.OBSStudio",
-            "Medal.Medal",
-            "VB-Audio.Voicemeeter.Banana",
+            new() { FriendlyName = "Streamlabs Desktop", Kind = AppKind.Winget, WingetId = "Streamlabs.StreamlabsOBS" },
+            new() { FriendlyName = "OBS Studio", Kind = AppKind.Winget, WingetId = "OBSProject.OBSStudio" },
+            new() { FriendlyName = "Medal.tv", Kind = AppKind.Winget, WingetId = "Medal.Medal" },
+            new() { FriendlyName = "Voicemeeter Banana", Kind = AppKind.Winget, WingetId = "VB-Audio.Voicemeeter.Banana" },
 
             // General utility
-            "Microsoft.VisualStudioCode",
-            "Microsoft.PowerShell",
-            "Microsoft.Office",
-            "Microsoft.PowerToys",
-            "Python.Python.3",
-            "VideoLAN.VLC",
-            "7zip.7zip",
-            "NexusMods.Vortex"
-        };
+            new() { FriendlyName = "VS Code", Kind = AppKind.Winget, WingetId = "Microsoft.VisualStudioCode" },
+            new() { FriendlyName = "PowerShell 7", Kind = AppKind.Winget, WingetId = "Microsoft.PowerShell" },
+            new() { FriendlyName = "Microsoft 365 Apps", Kind = AppKind.Winget, WingetId = "Microsoft.Office" },
+            new() { FriendlyName = "PowerToys", Kind = AppKind.Winget, WingetId = "Microsoft.PowerToys" },
+            new() { FriendlyName = "Python 3", Kind = AppKind.Winget, WingetId = "Python.Python.3" },
+            new() { FriendlyName = "VLC Media Player", Kind = AppKind.Winget, WingetId = "VideoLAN.VLC" },
+            new() { FriendlyName = "7-Zip", Kind = AppKind.Winget, WingetId = "7zip.7zip" },
+            new() { FriendlyName = "Vortex Mod Manager", Kind = AppKind.Winget, WingetId = "NexusMods.Vortex" },
 
-        // Apps with no reliable winget package - downloaded and installed manually.
-        // (MSI Afterburner is deliberately not here - it isn't reliably available via
-        // winget and there's no stable direct-download URL to hardcode safely.)
-        private static readonly (string Name, string FileName, string Url)[] ManualInstallers =
-        {
-            ("Hyte Nexus", "HyteNexusInstaller.exe", "https://hyte.co/nexus-download"),
-            ("L-Connect 3", "LConnect3.zip", "https://lianli-update-2025.lianli-cn.com/L3_CX/20260422-L-Connect%203-x64-v2.1.20-fde9a570.zip")
+            // Manual installers - no reliable winget package. Included in the same
+            // pickable list as everything else so the wizard can offer to skip them
+            // (most people don't own this specific hardware).
+            new() { FriendlyName = "Hyte Nexus (HYTE case/AIO control)", Kind = AppKind.Manual,
+                    ManualFileName = "HyteNexusInstaller.exe", ManualUrl = "https://hyte.co/nexus-download" },
+            new() { FriendlyName = "L-Connect 3 (Lian Li fan/lighting control)", Kind = AppKind.Manual,
+                    ManualFileName = "LConnect3.zip",
+                    ManualUrl = "https://lianli-update-2025.lianli-cn.com/L3_CX/20260422-L-Connect%203-x64-v2.1.20-fde9a570.zip" }
         };
 
         private const int MaxRetries = 2;
@@ -85,33 +105,50 @@ namespace GamingStackGUI
             Log($"  ! {text}");
         }
 
-        public async Task RunAsync()
+        /// <summary>
+        /// Installs exactly what's passed in - the wizard (MainForm) is responsible
+        /// for deciding that, whether it's the full catalog, a hand-picked subset, or
+        /// (if the user picked nothing) an empty list, which is a no-op here.
+        /// </summary>
+        public async Task RunAsync(IReadOnlyList<AppEntry> selected)
         {
             try
             {
                 Directory.CreateDirectory(_workDir);
                 try { File.Delete(FailFile); } catch { /* fine if it didn't exist */ }
 
-                Log("GamingStack Installer");
-                Log("");
-
-                if (!IsWingetAvailable())
+                if (selected.Count == 0)
                 {
-                    Log("ERROR: winget not found.");
-                    Fail("winget not found - install 'App Installer' from the Microsoft Store and re-run.");
-                    OnFinished?.Invoke();
+                    Log("Nothing selected - nothing to install.");
                     return;
                 }
 
-                Log($"Installing {AppsToInstall.Length} apps via winget...");
+                Log($"Installing {selected.Count} selected item(s)...");
                 Log("");
-                foreach (var id in AppsToInstall)
-                    await InstallWingetAppAsync(id);
 
-                Log("");
-                Log("Handling manual installers...");
-                foreach (var (name, fileName, url) in ManualInstallers)
-                    await HandleManualInstallerAsync(name, fileName, url);
+                var wingetOk = IsWingetAvailable();
+                if (!wingetOk && selected.Any(a => a.Kind == AppKind.Winget))
+                {
+                    Log("WARNING: winget not found - winget-based selections will be skipped.");
+                    Fail("winget not found - install 'App Installer' from the Microsoft Store to install winget-based apps.");
+                }
+
+                foreach (var entry in selected)
+                {
+                    if (entry.Kind == AppKind.Winget)
+                    {
+                        if (!wingetOk)
+                        {
+                            Log($"[{entry.FriendlyName}] skipped - winget unavailable");
+                            continue;
+                        }
+                        await InstallWingetAppAsync(entry);
+                    }
+                    else
+                    {
+                        await HandleManualInstallerAsync(entry);
+                    }
+                }
 
                 Log("");
                 Log("Applying gaming tweaks...");
@@ -121,7 +158,7 @@ namespace GamingStackGUI
                 if (File.Exists(FailFile))
                     Log($"Done, with a few things needing manual attention - see {FailFile}");
                 else
-                    Log("Done. GamingStack is ready - go install your games and enjoy.");
+                    Log("Done.");
             }
             catch (Exception ex)
             {
@@ -154,11 +191,12 @@ namespace GamingStackGUI
             }
         }
 
-        private async Task InstallWingetAppAsync(string id)
+        private async Task InstallWingetAppAsync(AppEntry entry)
         {
+            var id = entry.WingetId!;
             for (int attempt = 1; attempt <= MaxRetries + 1; attempt++)
             {
-                Log($"[{id}] installing (attempt {attempt})...");
+                Log($"[{entry.FriendlyName}] installing (attempt {attempt})...");
                 try
                 {
                     var psi = new ProcessStartInfo("winget",
@@ -175,25 +213,29 @@ namespace GamingStackGUI
 
                     if (p.ExitCode == 0)
                     {
-                        Log($"[{id}] OK");
+                        Log($"[{entry.FriendlyName}] OK");
                         return;
                     }
-                    Log($"[{id}] exit code {p.ExitCode}");
+                    Log($"[{entry.FriendlyName}] exit code {p.ExitCode}");
                 }
                 catch (Exception ex)
                 {
-                    Log($"[{id}] error: {ex.Message}");
+                    Log($"[{entry.FriendlyName}] error: {ex.Message}");
                 }
 
                 if (attempt <= MaxRetries)
                     await Task.Delay(3000);
             }
 
-            Fail($"winget install failed for {id} after {MaxRetries + 1} attempts");
+            Fail($"winget install failed for {entry.FriendlyName} after {MaxRetries + 1} attempts");
         }
 
-        private async Task HandleManualInstallerAsync(string name, string fileName, string url)
+        private async Task HandleManualInstallerAsync(AppEntry entry)
         {
+            var name = entry.FriendlyName;
+            var fileName = entry.ManualFileName!;
+            var url = entry.ManualUrl!;
+
             if (string.IsNullOrWhiteSpace(url))
             {
                 Fail($"{name} missing download URL");

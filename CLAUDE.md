@@ -45,7 +45,12 @@ publish. Everything lives in one process:
   "embedded resource path mismatch" bug that broke the first version.
 - `InstallerEngine.cs` - the actual install stack (winget loop, manual
   installer fallback, tweaks), decoupled from the UI via an `OnLog`
-  event so it doesn't know anything about WinForms.
+  event so it doesn't know anything about WinForms. Exposes a static
+  `Catalog` of `AppEntry` (friendly name + winget ID or manual URL,
+  discriminated by `AppKind`) - this is the single source of truth for
+  what's installable; `RunAsync` takes the selected subset as a
+  parameter rather than deciding for itself, since the wizard in
+  `MainForm.cs` owns that decision.
 
 ## Stage flow (`MainForm.cs`)
 
@@ -74,10 +79,27 @@ Bios -> Boot -> Desktop -> Terminal
   art (drive/folder shapes, not copied Windows icons), taskbar with a live
   clock. Holds 7s.
 - **Terminal**: a command-prompt-style window that scales in from the
-  center (ease-out cubic), then runs `InstallerEngine.RunAsync()` on a
-  background task and streams its `OnLog` output into a scrolling,
-  thread-safe log (`_terminalLines`, guarded by `_terminalLock`) drawn
-  as the terminal's content.
+  center (ease-out cubic), then runs an interactive install wizard
+  (`WizardPhase` enum in `MainForm.cs`) before ever touching
+  `InstallerEngine`:
+  - `ConfirmAll` shows the full `InstallerEngine.Catalog` (friendly
+    names) and asks Y/N to install everything.
+  - `N` -> `ChooseIndividually` asks whether to pick items one at a time;
+    `Y` -> `PerApp` walks the catalog asking Y/N per entry, building
+    `_selectedApps` and showing a live checklist (`_perAppDecisions`).
+  - `N` to choosing individually -> `ConfirmQuit`; `Y` closes the app,
+    `N` -> `EasterEgg` (an original wobbling floppy-disk mascot, 5s) then
+    `Farewell`.
+  - Once a selection is made (full catalog or a hand-picked subset,
+    even if empty), `StartInstall()` runs `InstallerEngine.RunAsync(_selectedApps)`
+    on a background task and streams its `OnLog` output into a scrolling,
+    thread-safe log (`_terminalLines`, guarded by `_terminalLock`).
+    `OnFinished` transitions to `Farewell`.
+  - `Farewell` is a styled ASCII-bordered sign-off screen reached from
+    either path (real install finishing, or the easter egg timing out) -
+    it's the same message either way, per the user's explicit request.
+  - Y/N keys only do anything while `_stage == Stage.Terminal`, routed
+    through `HandleWizardKey` from `OnKeyDown`.
 
 ## Copyright constraint - important
 
@@ -112,6 +134,18 @@ can - so requesting `requireAdministrator` on a debug launch throws "the
 requested operation requires elevation" every time. Don't remove the
 Debug manifest or point both configurations at the same manifest file;
 that reintroduces this exact error for anyone doing `dotnet run`.
+
+## Fullscreen / taskbar note
+
+The form is positioned explicitly via `Screen.FromPoint(Cursor.Position)`
+and `Bounds = screen.Bounds` (not `WindowState.Maximized`, which doesn't
+reliably cover the full physical screen on every DPI/multi-monitor setup)
+and marked `TopMost = true`. The `TopMost` part matters even with correct
+bounds: the real Windows taskbar is itself an always-on-top window, and
+without this our own drawn taskbar could render *behind* it. Don't drop
+either half of this fix independently - both were needed to actually
+resolve the "taskbar renders off/behind screen" bug reported during
+testing.
 
 ## Running it
 

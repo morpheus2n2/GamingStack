@@ -11,6 +11,233 @@ Everything below `0.6.2` predates versioning entirely, so those entries are
 backfilled from the original milestone-based changelog and given version
 numbers retroactively - there's no real date for them, only relative order.
 
+## [0.12.0] - Konami code easter egg
+
+### Added
+- **Konami code easter egg** - enter Up, Up, Down, Down, Left, Right, Left,
+  Right, B, A at any point in the app (BIOS screen, boot animation, desktop,
+  or the terminal wizard - it's checked on every keypress regardless of
+  stage) to trigger a "Cheat Code Accepted" toast. It doesn't do anything
+  else - it's a throwaway joke, not a functional unlock.
+- The only hint is a disguised line on the fake BIOS POST screen, tucked in
+  right after the disk listing as an ordinary-looking peripheral-detection
+  entry: `Input Device: Standard 104-Key Keyboard (↑↑↓↓←→←→BA) - OK`.
+- Routes through a new `UnlockSecretAchievement`, kept deliberately separate
+  from the catalog-bound `UnlockAchievement`/`AllAchievements` so this one
+  never appears in, or inflates the count on, the summary screen's
+  achievement tracker - it stays a genuine hidden surprise.
+
+## [0.11.2] - Achievement tracker spacing
+
+### Changed
+- **More breathing room in the summary screen's achievement tracker** -
+  a spacer row now separates each achievement's title+description block
+  from the next (they were running straight into each other), and the gap
+  between the per-item breakdown above and the achievements heading below
+  it is a bit more generous.
+
+## [0.11.1] - Bigger toast, achievement descriptions on the tracker
+
+### Changed
+- **Achievement toast roughly doubled in size** - box, fonts, padding and
+  the trophy icon are all about 2x the 0.11.0 size, since the first pass
+  read as too small to comfortably read. Box width is capped against the
+  window's own width so it still fits a small/resized terminal.
+- **Summary screen's achievement tracker now shows each one's description**,
+  not just its title - wrapped to fit its column, with each column tracking
+  its own running row count so a longer description doesn't overlap the
+  entry below it (same fix already applied to the per-item breakdown above
+  it).
+
+## [0.11.0] - Achievement toast layout fix, summary tracker
+
+### Fixed
+- **Achievement toast text was overlapping/getting cut off** - the box was
+  a fixed 260x64, which was never enough room for the header line, title,
+  and a wrapped subtitle together (worst on longer titles like "Not
+  Everything's Meant To Be"). The box is now sized from its actual content
+  every time: both the title and subtitle wrap to fit, and the box grows
+  to whatever height that content needs instead of clipping it.
+
+### Added
+- **Achievement tracker on the Summary screen** - a two-column checklist
+  of every achievement that exists (`[x]`/`[ ]`, count in the heading),
+  tracked across the whole session rather than reset per run, so repeated
+  test runs build up a visible record instead of each one only showing
+  what it earned. Achievement titles/subtitles are now defined once in a
+  shared `AllAchievements` list instead of being repeated at each unlock
+  call site, which the tracker and the toasts both read from.
+
+## [0.10.0] - Achievement toast notifications
+
+### Added
+- **Achievement toasts** - small bottom-right pop-ups (original pixel-art
+  trophy icon, slide up / hold / fade out) that fire the moment a real
+  condition is met during a run, not on a script:
+  - **First Blood** - first successful install of the run
+  - **Completionist** - chose to install the entire catalog
+  - **Redistributable Rampage** - the VC++ Redistributables Pack finishes
+    without a genuine failure
+  - **Already Perfect** - hit an "already installed and up to date" skip
+  - **Not Everything's Meant To Be** - first genuine failure of the run
+  - **Speedrunner** - the whole install finishes in under 90 seconds
+  Each fires once per run. Toasts overlay whatever screen is currently
+  showing (wizard, installer log, summary) and queue one at a time rather
+  than stacking, so an achievement never has to wait for a specific
+  screen to unlock. This is also the plumbing the upcoming Konami code
+  easter egg will hook into.
+
+## [0.9.0] - Fake shutdown outro
+
+### Added
+- **New `ShuttingDown` wizard phase**, between Summary and Farewell: a
+  Windows 9x-style shutdown sequence played completely straight - a few
+  staged status lines ("Saving your settings...", "Closing GamingStack
+  Installer...", "GamingStack has finished configuring your PC.",
+  "Shutting down...") typed out over ~3 seconds, then the classic "It's
+  now safe to turn off your computer." screen (navy background, big
+  centered white text) framed inside the app's own fake terminal window -
+  a screen within the screen.
+- This phase is a beat, not a question: it plays itself out and
+  auto-advances to Farewell on its own after a short hold, no keypress
+  needed. Dismissing the Summary screen now leads here instead of
+  straight to Farewell.
+
+## [0.8.3] - Proper typewriter "clack", not a click
+
+### Changed
+- **Typewriter tick sound reworked for real Resident Evil save-point
+  character.** The 0.8.2 version was a single decaying tone-plus-noise
+  click, which read as a generic beep rather than a typewriter. It's now
+  three layered components per hit - a brief broadband strike (the key
+  hitting the platen), a short high metallic tick (the type-bar), and a
+  low-mid mechanical body resonance that carries the actual "clack" pitch
+  and rings out longest - mixed together, which is what makes a real
+  typewriter sound mechanical rather than electronic.
+- Four pre-rendered variants (slightly jittered pitch/timing) are now
+  cycled round-robin through their own `SoundPlayer` instances, instead of
+  retriggering one shared player - fast typing was cutting a click's tail
+  off to start the next one identically; now consecutive hits can overlap
+  and ring naturally, like an actual typewriter being typed on quickly.
+
+## [0.8.2] - Summary screen word-wrap, typewriter tick sound
+
+### Fixed
+- **Summary screen text no longer overlaps.** Failure/skip reason text was
+  drawn as a single unbroken line with no width limit, so anything longer
+  than the column (which happens constantly - these are free-text winget
+  error explanations) ran straight across into the other column's text.
+  Detail text now word-wraps to fit its own column, and the two-column
+  balancing pass accounts for how many wrapped lines each item's reason
+  actually takes, so the layout stays readable no matter how long the
+  install run's messages are or how many items were attempted.
+
+### Added
+- **Typewriter tick sound** during the wizard's app-list reveal - a short
+  synthesized mechanical "clack" (no new audio asset needed) plays as the
+  text types itself out, replacing the silence that was there before.
+
+## [0.8.1] - Friendly failure reasons for known winget exit codes
+
+### Changed
+- **Known winget exit codes now show a plain-English reason** on the summary
+  screen instead of a bare `exit code -1978335189`. The three we kept
+  hitting during testing are recognized directly:
+  `APPINSTALLER_CLI_ERROR_UPDATE_NOT_APPLICABLE` ("already installed and
+  up to date"), `APPINSTALLER_CLI_ERROR_EXEC_UNINSTALL_COMMAND_FAILED`
+  ("a broken existing install is blocking this"), and a WinHTTP 404 HRESULT
+  ("winget's download link for this is currently broken upstream").
+- **"Already up to date" is no longer reported as a failure.** An app or
+  VC++ Redistributable member that winget refuses to reinstall because an
+  equal-or-newer version is already present now shows as skipped, not
+  failed, and stops retrying immediately instead of burning three attempts
+  on a result that was never going to change. The VC++ Redistributables
+  Pack entry only reports itself as failed when a package genuinely fails
+  for a different reason - already-current members no longer drag the
+  whole bundle's status down.
+
+## [0.8.0] - Persistent install log
+
+### Added
+- **Every install run now writes a full, timestamped log file to disk**
+  (`%TEMP%\GamingStack\logs\install_<yyyyMMdd_HHmmss>.log`) - every line
+  that used to only ever appear scrolling past in the terminal window
+  (attempt numbers, exit codes, error messages) is now captured verbatim
+  as it happens, not just the handful of things that hit `failed.txt`.
+  One file per run, so a previous run's log is never overwritten.
+- The summary screen now shows the full log's path directly, so there's
+  no need to go hunting in `%TEMP%` to find it after a run.
+
+## [0.7.2] - Razer Cortex restored as a manual download, Synapse bumped to 4
+
+### Changed
+- **Razer Cortex is back** - not on winget (confirmed in 0.7.1), but Razer
+  does distribute it as a direct download from their own site's own
+  "DOWNLOAD NOW" link. Re-added as a `Manual` catalog entry (same mechanism
+  as Hyte Nexus/L-Connect 3) pointed at Razer's stable short link
+  (`rzr.to/cortex-download`, which currently 302s to
+  `dl.razerzone.com/drivers/GameBooster/RazerCortexInstaller.exe`) rather
+  than the resolved CDN URL, so it keeps working if Razer moves the file
+- **Razer Synapse** now targets Synapse **4** (`RazerInc.RazerInstaller.Synapse4`)
+  instead of 3 - that's the current version per Razer's own site
+
+## [0.7.1] - Wrong winget IDs, summary layout/diagnostics fix
+
+### Fixed
+- **Razer Cortex removed from the catalog** - verified there's no winget package
+  for it at all; `RazerInc.RazerCortex` was never a real package ID, which is
+  why it failed on every run. Razer only ships Cortex bundled inside their
+  interactive installer, and no stable direct-download URL exists either, so
+  it's out until that changes.
+- **Razer Synapse**: `Razer.Synapse.3` → `RazerInc.RazerInstaller.Synapse3`
+  (the old ID doesn't exist - Razer's real winget package is namespaced under
+  their installer, not a standalone `Razer.*`)
+- **OpenRGB**: `CalcProgrammer1.OpenRGB` → `OpenRGB.OpenRGB` (the winget-pkgs
+  maintainers renamed this to the application-specific ID and switched its
+  installer to an MSI)
+- Every remaining winget ID in the catalog checked directly against the
+  winget-pkgs repo - the rest were already correct (Corsair iCUE, HWiNFO,
+  Speccy, and the launchers/utilities were all fine; if those still fail,
+  it's a per-machine issue, not a wrong ID, and the summary screen now shows
+  why - see below)
+- **Summary screen layout**: was reusing the wizard's full-catalog two-column
+  split, which left one column mostly empty and the other overflowing
+  whenever only a handful of items were actually selected (the "misaligned"
+  look from 0.7.0). Now bin-packs a fresh, balanced pair of columns from only
+  what was actually attempted each run (`BuildSummaryColumns`), and matches
+  the wizard's own spacing (blank line after each heading, not just before
+  the next one)
+
+### Added
+- `InstallerEngine` now captures *why* something failed - the winget exit
+  code, or the exception/download/extract error for manual installs - as
+  `ItemResult.Detail`, shown indented under the failed/skipped item on the
+  summary screen. No more digging through the scrolled-past install log or
+  `failed.txt` to find out what actually went wrong.
+
+## [0.7.0] - Install summary screen
+
+### Added
+- **End-of-run summary**, shown after the real install finishes and before the
+  Farewell screen: totals ("X installed, Y failed, Z skipped") plus a full
+  per-item breakdown, grouped under the same category headings the wizard
+  used to offer them - `[x]` installed, `[!]` failed, `[-]` skipped. Press
+  any key to move on to Farewell. Skipped entirely when nothing was even
+  attempted (e.g. the whole run was declined).
+- `InstallerEngine` now fires a structured `OnItemResult` event per selected
+  catalog entry (`Installed`/`Failed`/`Skipped`) alongside its existing
+  free-text `OnLog`, so the summary screen doesn't need to parse log lines
+  to know what happened - `InstallWingetAppAsync`/`InstallBundleAsync`/
+  `HandleManualInstallerAsync` all now report success/failure back to
+  `RunAsync` instead of firing and forgetting.
+
+## [0.6.3] - Slower wizard typewriter
+
+### Changed
+- Wizard app-list reveal speed cut way down (420 → 60 characters/second) -
+  it now reads like a deliberate typewriter, not a fast terminal dump.
+  Also doubles as a nod for anyone who clocks the save-point vibe.
+
 ## [0.6.2] - Nullable warning fix
 
 ### Fixed

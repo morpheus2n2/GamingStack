@@ -6,7 +6,7 @@
 ![Platform](https://img.shields.io/badge/platform-Windows-blue)
 ![.NET](https://img.shields.io/badge/.NET-8.0-purple)
 ![Status](https://img.shields.io/badge/status-WIP-orange)
-[![Version](https://img.shields.io/badge/version-0.6.2-brightgreen.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.12.0-brightgreen.svg)](CHANGELOG.md)
 
 A fully automated, over-the-top retro-styled Windows 11 gaming setup app.
 Boots through a fake BIOS screen (pulling your *real* CPU/RAM/GPU/disk info),
@@ -27,17 +27,33 @@ lose. Download it, run it, walk away.
   wallpaper
 - **Interactive install wizard**, running inside a terminal window that
   animates open: shows the full app list grouped under a heading per
-  category, then asks whether to install everything, pick items one by
-  one, or bail out — see [How the install works](#how-the-install-works)
+  category, typed out Resident Evil save-point style with a mechanical
+  typewriter tick, then asks whether to install everything, pick items one
+  by one, or bail out — see [How the install works](#how-the-install-works)
   below
 - **Real installer**: installs the selected apps via `winget` with
   retries, silently installs every VC++ Redistributable version as one
   bundled entry, handles a few apps that need manual download/install,
   and applies a few gaming-related tweaks (Game Mode, hardware-accelerated
   GPU scheduling, High Performance power plan)
+- **Install summary** at the end of a run — totals plus a per-item
+  installed/failed/skipped breakdown, grouped by category, with a
+  plain-English reason next to anything that failed or was skipped (known
+  winget outcomes like "already installed and up to date" are translated
+  out of raw exit codes rather than shown as a mystery failure)
+- **Full install log** written to disk every run (path shown on the
+  summary screen) — every line the terminal window shows, not just failures
+- **Fake shutdown outro** — a Windows 9x-style shutdown sequence plays
+  after the install summary, ending on the classic "It's now safe to turn
+  off your computer" screen, before moving on to the sign-off
+- **Achievement toasts** — small pop-ups (First Blood, Completionist,
+  Redistributable Rampage, Already Perfect, Not Everything's Meant To Be,
+  Speedrunner) fire during a run the moment their real condition is met,
+  with a tracker on the summary screen showing which ones you've earned
+  across the session
 - **Easter eggs** — press <kbd>Delete</kbd> during the BIOS screen for a
-  joke blue screen, or decline every install option in the wizard for a
-  small surprise
+  joke blue screen, decline every install option in the wizard for a small
+  surprise, or find the hidden classic cheat code for a throwaway joke toast
 - Runs as a single self-contained `.exe` — no separate files to install
   alongside it
 
@@ -55,6 +71,10 @@ of what's on offer and asks:
    small easter egg, then the same sign-off screen you'd see after a
    real install.
 
+After a real install run, the summary screen leads into a fake shutdown
+sequence before the sign-off screen — press any key to move past the
+summary, the rest plays itself out.
+
 ## What it installs
 
 The wizard groups everything under a heading per category:
@@ -62,7 +82,8 @@ The wizard groups everything under a heading per category:
 - **Game Launchers** — Steam, Epic, GOG, Ubisoft Connect, Battle.net,
   Amazon Games, Discord, Playnite to tie the launchers together
 - **Monitoring & Performance** — NVIDIA App, HWiNFO, CPU-Z, Speccy,
-  CrystalDiskInfo, Process Lasso, Razer Cortex
+  CrystalDiskInfo, Process Lasso, Razer Cortex (direct download - no winget
+  package exists for it)
 - **Streaming & Recording** — Streamlabs Desktop, Medal.tv, Voicemeeter
   Banana
 - **General Utilities** — VS Code, PowerShell 7, Microsoft 365 Apps,
@@ -79,10 +100,10 @@ The wizard groups everything under a heading per category:
 The full list — and how to change it — is the `Catalog` in
 `InstallerEngine.cs`.
 
-Apps with no reliable `winget` package (Hyte Nexus, L-Connect 3) are
-downloaded and installed directly instead, but sit in the same pickable
-list as everything else so you can skip them if you don't own that
-hardware.
+Apps with no reliable `winget` package (Razer Cortex, Hyte Nexus,
+L-Connect 3) are downloaded and installed directly instead, but sit in
+the same pickable list as everything else so you can skip them if you
+don't own that hardware.
 
 ## Requirements
 
@@ -132,8 +153,11 @@ expected.
 - [x] Retro boot sequence (BIOS, boot animation, desktop, terminal)
 - [x] Real installer stack (winget loop, manual installer fallback, tweaks)
 - [x] Interactive install wizard (install all / pick individually / quit)
+- [x] Installation summary screen
+- [x] Fake "shutting down" outro
+- [x] Achievement toast notifications
+- [x] Konami code easter egg
 - [ ] Real boot animation assets (currently original placeholder artwork)
-- [ ] Installation log viewer / summary screen
 
 ## Safety note
 

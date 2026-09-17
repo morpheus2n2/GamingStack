@@ -123,9 +123,18 @@ Bios -> Boot -> Desktop -> Terminal
     even if empty), `StartInstall()` runs `InstallerEngine.RunAsync(_selectedApps)`
     on a background task and streams its `OnLog` output into a scrolling,
     thread-safe log (`_terminalLines`, guarded by `_terminalLock`).
-    `OnFinished` transitions to `Farewell`.
+    `InstallerEngine` also fires a structured `OnItemResult` event per
+    selected entry (`Installed`/`Failed`/`Skipped`), collected into
+    `_itemResults` (guarded by `_itemResultLock`) - this, not the
+    free-text log, is what the summary screen renders from.
+    `OnFinished` transitions to `Summary`, not straight to `Farewell`.
+  - `Summary` (`DrawSummary`) reports what actually happened: totals plus
+    a per-item breakdown grouped under the same category headings the
+    wizard used (reuses `_wizardColumn0`/`_wizardColumn1`). Any key moves
+    on to `Farewell` - it's a report, not a Y/N question, so it's handled
+    before the `yn` switch in `HandleWizardKey`, not inside it.
   - `Farewell` is a styled ASCII-bordered sign-off screen reached from
-    either path (real install finishing, or the easter egg timing out) -
+    either path (a real install's `Summary`, or the easter egg timing out) -
     it's the same message either way, per the user's explicit request.
   - Y/N keys only do anything while `_stage == Stage.Terminal`, routed
     through `HandleWizardKey` from `OnKeyDown`.
@@ -144,19 +153,22 @@ with the user.
 
 The installer stack is built (`InstallerEngine.cs`) - winget loop with
 retries, manual-installer fallback chain, and gaming tweaks, all logging
-into the terminal window. Still open:
+into the terminal window, plus a structured per-item summary (0.7.0+).
+Still open:
 - Real boot animation assets (the flag/clouds/sky are original placeholder
   artwork, described in the Boot stage above)
-- Installation log viewer / summary screen at the end of a run
 - MSI Afterburner has no reliable winget package and no verified stable
   direct-download URL was available when the manual-installer list was
   built - add it there if/when a good source is confirmed
-- Three winget IDs in the catalog are best-guess, not verified on a real
-  machine: `RazerInc.RazerCortex` (Razer Cortex), `Corsair.iCUE.4`
-  (Corsair iCUE) and `Razer.Synapse.3` (Razer Synapse). These vendors
-  change package IDs more than most - if one of these three keeps
-  reporting a failed install in the terminal log, run
-  `winget search <name>` and correct the ID in `InstallerEngine.cs`.
+- Every winget ID in the catalog was checked directly against the
+  winget-pkgs repo as of 0.7.1 (this is what caught Razer Cortex never
+  having had a real package ID, and two other IDs that had drifted -
+  see the 0.7.1 changelog entry). Vendor-published apps (RGB/peripheral
+  control especially) still change IDs more than most, so if one starts
+  failing every time, re-check it with `winget search <name>` first -
+  the summary screen's per-item failure detail (exit code or error
+  message) is the fastest way to tell "wrong ID" apart from "installer
+  quirk on this machine".
 
 ## Dev workflow note - two manifests
 

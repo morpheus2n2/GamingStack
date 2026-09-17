@@ -34,6 +34,16 @@ namespace GamingStackGUI
     }
 
     /// <summary>
+    /// What happened to one catalog entry, once. Fired via
+    /// <see cref="InstallerEngine.OnItemResult"/> alongside the free-text log so the
+    /// UI can build a structured end-of-run summary (grouped by category, like the
+    /// wizard's own list) instead of parsing human-readable log lines.
+    /// </summary>
+    public enum InstallResultKind { Installed, Failed, Skipped }
+
+    public readonly record struct ItemResult(AppEntry Entry, InstallResultKind Kind, string? Detail = null);
+
+    /// <summary>
     /// The actual install stack, ported directly from the earlier PowerShell version -
     /// same behavior (retries, manual-installer fallback chain, tweaks), just written
     /// as C# so it runs in-process instead of shelling out to a script.
@@ -46,6 +56,9 @@ namespace GamingStackGUI
     {
         public event Action<string>? OnLog;
         public event Action? OnFinished;
+        // Fired once per selected catalog entry, after that entry's own install
+        // attempt(s) finish - the summary screen builds off these, not the log text.
+        public event Action<ItemResult>? OnItemResult;
 
         private static readonly HttpClient Http = new();
 
@@ -54,9 +67,10 @@ namespace GamingStackGUI
         // appear here. Edit here to add/remove/rename what's on offer - friendly names
         // are what the user sees, everything else is what actually gets run.
         //
-        // A few winget IDs below (marked inline) are the RGB/peripheral ecosystem apps
-        // - these vendors change their package IDs more often than most, so if one
-        // fails every time, run `winget search <vendor>` and fix the ID here.
+        // Every winget ID below has been checked against the winget-pkgs repo directly
+        // (not just "seemed right") as of 2026-09. Vendor-published apps (RGB/peripheral
+        // control especially) change package IDs more than most, so if one starts
+        // failing every time, that's the first thing to re-check with `winget search`.
         public static readonly IReadOnlyList<AppEntry> Catalog = new List<AppEntry>
         {
             // Launchers / core
@@ -76,8 +90,16 @@ namespace GamingStackGUI
             new() { FriendlyName = "Speccy", Category = "Monitoring & Performance", Kind = AppKind.Winget, WingetId = "Piriform.Speccy" },
             new() { FriendlyName = "CrystalDiskInfo", Category = "Monitoring & Performance", Kind = AppKind.Winget, WingetId = "CrystalDewWorld.CrystalDiskInfo" },
             new() { FriendlyName = "Process Lasso", Category = "Monitoring & Performance", Kind = AppKind.Winget, WingetId = "BitSum.ProcessLasso" },
-            // Winget ID assumed - verify with `winget search razer cortex` if it fails.
-            new() { FriendlyName = "Razer Cortex", Category = "Monitoring & Performance", Kind = AppKind.Winget, WingetId = "RazerInc.RazerCortex" },
+            // No winget package exists for Cortex - Razer only distributes it as a
+            // direct download, so it's a Manual entry like Hyte Nexus/L-Connect 3
+            // below rather than a (nonexistent) winget ID. Uses Razer's own stable
+            // "DOWNLOAD NOW" short link (rzr.to/cortex-download, currently 302s to
+            // dl.razerzone.com/drivers/GameBooster/RazerCortexInstaller.exe) rather
+            // than the resolved CDN URL, since HttpClient follows redirects and the
+            // short link should keep working even if Razer moves the file.
+            new() { FriendlyName = "Razer Cortex", Category = "Monitoring & Performance", Kind = AppKind.Manual,
+                    ManualFileName = "RazerCortexInstaller.exe",
+                    ManualUrl = "https://rzr.to/cortex-download" },
 
             // Streaming / recording / audio
             new() { FriendlyName = "Streamlabs Desktop", Category = "Streaming & Recording", Kind = AppKind.Winget, WingetId = "Streamlabs.StreamlabsOBS" },
@@ -114,10 +136,16 @@ namespace GamingStackGUI
             // manual installers below. OpenRGB is the odd one out: a single open-source
             // app that talks to hardware from several vendors at once, for anyone who'd
             // rather avoid running four different vendor apps.
-            // Winget IDs assumed for iCUE/Synapse - verify with `winget search` if either fails.
+            // All three IDs below verified against the winget-pkgs repo directly.
             new() { FriendlyName = "Corsair iCUE", Category = "RGB & Peripheral Control", Kind = AppKind.Winget, WingetId = "Corsair.iCUE.4" },
-            new() { FriendlyName = "Razer Synapse", Category = "RGB & Peripheral Control", Kind = AppKind.Winget, WingetId = "Razer.Synapse.3" },
-            new() { FriendlyName = "OpenRGB (universal, multi-vendor)", Category = "RGB & Peripheral Control", Kind = AppKind.Winget, WingetId = "CalcProgrammer1.OpenRGB" },
+            // Was "Razer.Synapse.3" - that ID doesn't exist; Razer's actual winget
+            // package is namespaced under their installer, not a standalone "Razer.*".
+            // Synapse 4 is the current version per Razer's own site, so this targets
+            // that rather than the still-available (but now legacy) Synapse 3 package.
+            new() { FriendlyName = "Razer Synapse", Category = "RGB & Peripheral Control", Kind = AppKind.Winget, WingetId = "RazerInc.RazerInstaller.Synapse4" },
+            // Was "CalcProgrammer1.OpenRGB" - the winget-pkgs maintainers renamed this to
+            // the application-specific ID and switched its installer to an MSI.
+            new() { FriendlyName = "OpenRGB (universal, multi-vendor)", Category = "RGB & Peripheral Control", Kind = AppKind.Winget, WingetId = "OpenRGB.OpenRGB" },
             new() { FriendlyName = "Hyte Nexus (HYTE case/AIO control)", Category = "RGB & Peripheral Control", Kind = AppKind.Manual,
                     ManualFileName = "HyteNexusInstaller.exe", ManualUrl = "https://hyte.co/nexus-download" },
             new() { FriendlyName = "L-Connect 3 (Lian Li fan/lighting control)", Category = "RGB & Peripheral Control", Kind = AppKind.Manual,
@@ -125,12 +153,58 @@ namespace GamingStackGUI
                     ManualUrl = "https://lianli-update-2025.lianli-cn.com/L3_CX/20260422-L-Connect%203-x64-v2.1.20-fde9a570.zip" }
         };
 
+        // A handful of winget exit codes are common enough, and confusing enough out of
+        // context, that they're worth translating into plain English instead of showing
+        // a bare "exit code -1978335189" on the summary screen. AlreadyUpToDate codes are
+        // treated as a Skipped result rather than a Failed one - winget refusing to
+        // reinstall something that's already current isn't actually a problem. Sourced
+        // from AppInstallerErrors.h in the winget-cli repo, plus the HRESULT convention
+        // where a WinHTTP-facility code's low word is a literal HTTP status.
+        private static readonly Dictionary<int, (bool AlreadyUpToDate, string Friendly)> KnownWingetExitCodes = new()
+        {
+            // APPINSTALLER_CLI_ERROR_UPDATE_NOT_APPLICABLE - an equal or newer version is
+            // already installed, so winget refuses to reinstall it. Not a real failure.
+            { unchecked((int)0x8A15002B), (true, "already installed and up to date - nothing to do") },
+            // APPINSTALLER_CLI_ERROR_EXEC_UNINSTALL_COMMAND_FAILED - winget tried to
+            // repair/replace an existing install and the uninstall step it ran first
+            // failed. Usually a leftover broken install; uninstalling it by hand first
+            // and re-running the install usually clears it.
+            { unchecked((int)0x8A150030), (false, "a broken existing install is blocking this - try uninstalling it manually first, then rerun") },
+            // WinHTTP-facility HRESULT whose low word is a literal HTTP status code -
+            // 0x194 = 404. Means winget's own package manifest currently points at a dead
+            // download URL upstream. Nothing wrong with this app or your PC - just wait
+            // for the manifest to get fixed, or check "winget show <id>" another day.
+            { unchecked((int)0x80190194), (false, "winget's download link for this is currently broken upstream (404) - not something this app can fix, try again another day") },
+        };
+
+        private static string DescribeExitCode(int exitCode) =>
+            KnownWingetExitCodes.TryGetValue(exitCode, out var known)
+                ? known.Friendly
+                : $"exit code {exitCode} (unrecognized - check the full log for winget's own output)";
+
         private const int MaxRetries = 2;
 
         private readonly string _workDir = Path.Combine(Path.GetTempPath(), "GamingStack");
         private string FailFile => Path.Combine(_workDir, "failed.txt");
 
-        private void Log(string text) => OnLog?.Invoke(text);
+        // Every OnLog line, verbatim, written to disk as it happens - this exists
+        // specifically because the terminal window scrolls past faster than anyone
+        // can read exit codes off it, and failed.txt only ever captured the handful
+        // of things that called Fail(), not the full "attempt 1... attempt 2..."
+        // trail. One timestamped file per run, so a previous run's log is never
+        // overwritten by the next one. MainForm reads this back via LogFilePath.
+        private string? _logFilePath;
+        public string? LogFilePath => _logFilePath;
+
+        private void Log(string text)
+        {
+            OnLog?.Invoke(text);
+            if (_logFilePath != null)
+            {
+                try { File.AppendAllText(_logFilePath, text + Environment.NewLine); }
+                catch { /* logging shouldn't itself be fatal */ }
+            }
+        }
 
         private void Fail(string text)
         {
@@ -150,6 +224,16 @@ namespace GamingStackGUI
             {
                 Directory.CreateDirectory(_workDir);
                 try { File.Delete(FailFile); } catch { /* fine if it didn't exist */ }
+
+                var logsDir = Path.Combine(_workDir, "logs");
+                Directory.CreateDirectory(logsDir);
+                _logFilePath = Path.Combine(logsDir, $"install_{DateTime.Now:yyyyMMdd_HHmmss}.log");
+                try
+                {
+                    File.WriteAllText(_logFilePath,
+                        $"GamingStack install log - {DateTime.Now:yyyy-MM-dd HH:mm:ss}{Environment.NewLine}{Environment.NewLine}");
+                }
+                catch { /* if this fails, Log() below just no-ops the file side */ }
 
                 if (selected.Count == 0)
                 {
@@ -174,22 +258,27 @@ namespace GamingStackGUI
                         if (!wingetOk)
                         {
                             Log($"[{entry.FriendlyName}] skipped - winget unavailable");
+                            OnItemResult?.Invoke(new ItemResult(entry, InstallResultKind.Skipped, "winget unavailable"));
                             continue;
                         }
-                        await InstallWingetAppAsync(entry);
+                        var (kind, detail) = await InstallWingetAppAsync(entry);
+                        OnItemResult?.Invoke(new ItemResult(entry, kind, detail));
                     }
                     else if (entry.Kind == AppKind.Bundle)
                     {
                         if (!wingetOk)
                         {
                             Log($"[{entry.FriendlyName}] skipped - winget unavailable");
+                            OnItemResult?.Invoke(new ItemResult(entry, InstallResultKind.Skipped, "winget unavailable"));
                             continue;
                         }
-                        await InstallBundleAsync(entry);
+                        var (kind, detail) = await InstallBundleAsync(entry);
+                        OnItemResult?.Invoke(new ItemResult(entry, kind, detail));
                     }
                     else
                     {
-                        await HandleManualInstallerAsync(entry);
+                        var (ok, detail) = await HandleManualInstallerAsync(entry);
+                        OnItemResult?.Invoke(new ItemResult(entry, ok ? InstallResultKind.Installed : InstallResultKind.Failed, detail));
                     }
                 }
 
@@ -209,6 +298,8 @@ namespace GamingStackGUI
             }
             finally
             {
+                if (_logFilePath != null)
+                    Log($"Full log saved to {_logFilePath}");
                 OnFinished?.Invoke();
             }
         }
@@ -234,29 +325,54 @@ namespace GamingStackGUI
             }
         }
 
-        private Task InstallWingetAppAsync(AppEntry entry) => InstallWingetIdAsync(entry.WingetId!, entry.FriendlyName);
+        private Task<(InstallResultKind Kind, string? Detail)> InstallWingetAppAsync(AppEntry entry) =>
+            InstallWingetIdAsync(entry.WingetId!, entry.FriendlyName);
 
         /// <summary>
         /// A Bundle entry is just several winget IDs installed back-to-back under one
         /// friendly catalog line (e.g. every VC++ Redistributable version) - each ID
-        /// still gets its own retry loop, but failures are summarized under the
+        /// still gets its own retry loop, but the outcome is summarized under the
         /// bundle's own name so the log doesn't read like a dozen unrelated packages.
+        /// Already-up-to-date members don't count against the bundle - only a genuine
+        /// failure (something other than "already installed") marks the whole bundle
+        /// as Failed.
         /// </summary>
-        private async Task InstallBundleAsync(AppEntry entry)
+        private async Task<(InstallResultKind Kind, string? Detail)> InstallBundleAsync(AppEntry entry)
         {
             var ids = entry.BundleWingetIds ?? Array.Empty<string>();
             Log($"[{entry.FriendlyName}] installing {ids.Length} package(s) silently...");
-            var failed = 0;
+            var installedCount = 0;
+            var skippedCount = 0;
+            var failedCount = 0;
+            string? lastFailedDetail = null;
             foreach (var id in ids)
             {
-                var ok = await InstallWingetIdAsync(id, $"{entry.FriendlyName} ({id})", quiet: true);
-                if (!ok) failed++;
+                var (kind, detail) = await InstallWingetIdAsync(id, $"{entry.FriendlyName} ({id})", quiet: true);
+                switch (kind)
+                {
+                    case InstallResultKind.Installed: installedCount++; break;
+                    case InstallResultKind.Skipped: skippedCount++; break;
+                    default: failedCount++; lastFailedDetail = detail; break;
+                }
             }
 
-            if (failed == 0)
-                Log($"[{entry.FriendlyName}] OK ({ids.Length} package(s))");
-            else
-                Fail($"{entry.FriendlyName}: {failed} of {ids.Length} package(s) failed - some redistributables may already be newer than the requested version, which winget treats as a failure even though nothing's actually wrong");
+            if (failedCount > 0)
+            {
+                var detail = $"{failedCount} of {ids.Length} genuinely failed - {lastFailedDetail}" +
+                             (skippedCount > 0 ? $" ({skippedCount} more already up to date, which is fine)" : "");
+                Fail($"{entry.FriendlyName}: {detail}");
+                return (InstallResultKind.Failed, detail);
+            }
+
+            if (installedCount == 0)
+            {
+                Log($"[{entry.FriendlyName}] all {ids.Length} package(s) already up to date");
+                return (InstallResultKind.Skipped, $"all {ids.Length} already installed and up to date");
+            }
+
+            Log($"[{entry.FriendlyName}] OK ({installedCount} installed{(skippedCount > 0 ? $", {skippedCount} already up to date" : "")})");
+            return (InstallResultKind.Installed,
+                skippedCount > 0 ? $"{installedCount} installed, {skippedCount} already up to date" : null);
         }
 
         /// <summary>
@@ -264,9 +380,14 @@ namespace GamingStackGUI
         /// <paramref name="quiet"/> skips the individual Fail() write for bundle
         /// members (already-newer redist versions "fail" constantly and are noise);
         /// the bundle as a whole still reports its own summary via InstallBundleAsync.
+        /// Returns a friendly Detail string alongside the outcome - for a recognized
+        /// exit code that just means "already up to date", that's an immediate Skipped
+        /// with no retries (winget isn't going to change its mind), since retrying three
+        /// times just delays the run for no reason.
         /// </summary>
-        private async Task<bool> InstallWingetIdAsync(string id, string displayName, bool quiet = false)
+        private async Task<(InstallResultKind Kind, string? Detail)> InstallWingetIdAsync(string id, string displayName, bool quiet = false)
         {
+            string? lastDetail = null;
             for (int attempt = 1; attempt <= MaxRetries + 1; attempt++)
             {
                 Log($"[{displayName}] installing (attempt {attempt})...");
@@ -287,12 +408,21 @@ namespace GamingStackGUI
                     if (p.ExitCode == 0)
                     {
                         Log($"[{displayName}] OK");
-                        return true;
+                        return (InstallResultKind.Installed, null);
                     }
-                    Log($"[{displayName}] exit code {p.ExitCode}");
+
+                    if (KnownWingetExitCodes.TryGetValue(p.ExitCode, out var known) && known.AlreadyUpToDate)
+                    {
+                        Log($"[{displayName}] {known.Friendly}");
+                        return (InstallResultKind.Skipped, known.Friendly);
+                    }
+
+                    lastDetail = DescribeExitCode(p.ExitCode);
+                    Log($"[{displayName}] exit code {p.ExitCode} - {lastDetail}");
                 }
                 catch (Exception ex)
                 {
+                    lastDetail = ex.Message;
                     Log($"[{displayName}] error: {ex.Message}");
                 }
 
@@ -301,11 +431,11 @@ namespace GamingStackGUI
             }
 
             if (!quiet)
-                Fail($"winget install failed for {displayName} after {MaxRetries + 1} attempts");
-            return false;
+                Fail($"winget install failed for {displayName} after {MaxRetries + 1} attempts - {lastDetail}");
+            return (InstallResultKind.Failed, lastDetail ?? "unknown error");
         }
 
-        private async Task HandleManualInstallerAsync(AppEntry entry)
+        private async Task<(bool Success, string? Detail)> HandleManualInstallerAsync(AppEntry entry)
         {
             var name = entry.FriendlyName;
             var fileName = entry.ManualFileName!;
@@ -314,7 +444,7 @@ namespace GamingStackGUI
             if (string.IsNullOrWhiteSpace(url))
             {
                 Fail($"{name} missing download URL");
-                return;
+                return (false, "missing download URL");
             }
 
             var downloadDir = Path.Combine(_workDir, "downloads");
@@ -330,7 +460,7 @@ namespace GamingStackGUI
             catch (Exception ex)
             {
                 Fail($"Download failed for {name}: {ex.Message}");
-                return;
+                return (false, $"download failed: {ex.Message}");
             }
 
             var installerPath = filePath;
@@ -345,7 +475,7 @@ namespace GamingStackGUI
                 catch (Exception ex)
                 {
                     Fail($"Failed to extract {name}: {ex.Message}");
-                    return;
+                    return (false, $"extract failed: {ex.Message}");
                 }
 
                 var exe = new DirectoryInfo(extractDir)
@@ -355,7 +485,7 @@ namespace GamingStackGUI
                 if (exe == null)
                 {
                     Fail($"No executable found inside {fileName} for {name}");
-                    return;
+                    return (false, "no installer executable found in archive");
                 }
                 installerPath = exe.FullName;
             }
@@ -378,7 +508,7 @@ namespace GamingStackGUI
                     if (p.ExitCode == 0)
                     {
                         Log($"[{name}] OK");
-                        return;
+                        return (true, null);
                     }
                 }
                 catch
@@ -392,10 +522,12 @@ namespace GamingStackGUI
             {
                 Process.Start(new ProcessStartInfo(installerPath) { UseShellExecute = true });
                 Fail($"{name} launched interactively - finish it manually if a window appeared");
+                return (false, "no silent switch worked - launched interactively, finish it manually");
             }
             catch (Exception ex)
             {
                 Fail($"Failed to launch installer for {name}: {ex.Message}");
+                return (false, $"launch failed: {ex.Message}");
             }
         }
 

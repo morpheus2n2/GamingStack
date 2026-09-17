@@ -33,7 +33,9 @@ namespace GamingStackGUI
             ConfirmQuit,         // "Just want to quit? Y/N"
             EasterEgg,           // declined everything - a little joke, then Farewell
             Installing,          // InstallerEngine is actually running
-            Farewell             // final thank-you screen (reached from Installing or EasterEgg)
+            Summary,             // end-of-run report (installed/failed/skipped), shown before ShuttingDown
+            ShuttingDown,        // fake "shutting down" outro, auto-advances to Farewell
+            Farewell             // final thank-you screen (reached from ShuttingDown or EasterEgg)
         }
 
         private const int BiosMinHoldMs = 13000;
@@ -45,6 +47,7 @@ namespace GamingStackGUI
         private const int TerminalOpenMs = 400;
         private const int EasterEggHoldMs = 5000;
         private const double CloudSpeedMultiplier = 1.8;
+        private const long SpeedrunThresholdMs = 90000; // "Speedrunner" achievement cutoff
 
         private readonly System.Windows.Forms.Timer _timer = new() { Interval = 33 };
         private readonly Stopwatch _stageWatch = new();
@@ -88,6 +91,106 @@ namespace GamingStackGUI
         private int _perAppIndex;
         private bool?[] _perAppDecisions = Array.Empty<bool?>();
 
+        // Per-item outcomes for the Summary screen, populated via InstallerEngine's
+        // OnItemResult (fired on a background task, hence the lock) rather than by
+        // parsing the free-text terminal log.
+        private readonly List<ItemResult> _itemResults = new();
+        private readonly object _itemResultLock = new();
+
+        // ---- achievement toasts ----
+        // Unlock conditions are checked from wherever they naturally happen (the
+        // installer's background task via OnItemResult/OnFinished, or the wizard's UI
+        // thread for choice-based ones like Completionist), so the queue and the
+        // fired-set are guarded by their own lock. _currentToast/_toastWatch are only
+        // ever touched from Advance()/Paint on the UI thread, so they don't need it.
+        private readonly record struct Achievement(string Id, string Title, string Subtitle);
+
+        // Single source of truth for every achievement - both UnlockAchievement (by id)
+        // and the summary screen's tracker (which needs to list every achievement,
+        // locked or not) read from this instead of each call site repeating its own
+        // copy of the title/subtitle text.
+        private static readonly Achievement[] AllAchievements =
+        {
+            new("first_blood", "First Blood", "Your first successful install this run."),
+            new("completionist", "Completionist", "Going for the whole catalog, nothing held back."),
+            new("redistributable_rampage", "Redistributable Rampage", "Every VC++ runtime, handled in one go."),
+            new("already_perfect", "Already Perfect", "Something on this PC didn't need our help."),
+            new("not_meant_to_be", "Not Everything's Meant To Be", "Something didn't make it - check the summary for why."),
+            new("speedrunner", "Speedrunner", "Full install finished in under 90 seconds."),
+        };
+
+        private readonly HashSet<string> _achievementsFired = new();
+        private readonly Queue<Achievement> _pendingToasts = new();
+        private readonly object _achievementLock = new();
+        private Achievement? _currentToast;
+        private readonly Stopwatch _toastWatch = new();
+
+        private const int ToastSlideInMs = 250;
+        private const int ToastHoldMs = 2200;
+        private const int ToastFadeOutMs = 400;
+        private const int ToastTotalMs = ToastSlideInMs + ToastHoldMs + ToastFadeOutMs;
+
+        private void UnlockAchievement(string id)
+        {
+            var index = Array.FindIndex(AllAchievements, a => a.Id == id);
+            if (index < 0) return; // unknown id - shouldn't happen, just don't crash over it
+
+            lock (_achievementLock)
+            {
+                if (!_achievementsFired.Add(id)) return; // already unlocked this run
+                _pendingToasts.Enqueue(AllAchievements[index]);
+            }
+        }
+
+        // Deliberately separate from UnlockAchievement/AllAchievements - the Konami
+        // code's toast is a genuine hidden surprise, so it must never appear in (or
+        // inflate the count on) the Summary screen's achievement tracker, which only
+        // ever enumerates AllAchievements. Still routes through the same fired-set
+        // guard (keyed with a "secret_" prefix so it can't collide with a real id)
+        // so mashing the code twice in one run doesn't queue a second toast.
+        private void UnlockSecretAchievement(string id, string title, string subtitle)
+        {
+            lock (_achievementLock)
+            {
+                if (!_achievementsFired.Add("secret_" + id)) return;
+                _pendingToasts.Enqueue(new Achievement(id, title, subtitle));
+            }
+        }
+
+        // ---- Konami code easter egg ----
+        // The only hint anywhere in the app is the disguised BIOS POST line in
+        // BuildBiosTimeline(). Checked on every keypress regardless of _stage, so it
+        // works whether you're staring at the BIOS screen, the boot animation, the
+        // desktop, or the terminal wizard.
+        private static readonly Keys[] KonamiSequence =
+        {
+            Keys.Up, Keys.Up, Keys.Down, Keys.Down,
+            Keys.Left, Keys.Right, Keys.Left, Keys.Right,
+            Keys.B, Keys.A,
+        };
+        private int _konamiProgress;
+
+        private void CheckKonamiCode(Keys key)
+        {
+            if (key == KonamiSequence[_konamiProgress])
+            {
+                _konamiProgress++;
+                if (_konamiProgress == KonamiSequence.Length)
+                {
+                    _konamiProgress = 0;
+                    UnlockSecretAchievement("konami", "Cheat Code Accepted",
+                        "Konami code entered. It doesn't do anything - but you found it.");
+                }
+            }
+            else
+            {
+                // Restart the match, but allow the failed keypress to itself be a
+                // valid restart of the sequence (e.g. two Ups in a row shouldn't
+                // dead-end the whole thing).
+                _konamiProgress = key == KonamiSequence[0] ? 1 : 0;
+            }
+        }
+
         // ---- terminal window: draggable/resizable ----
         // Null until PaintTerminal first runs, which seeds these from the original
         // fixed 0.7/0.62-of-screen defaults; from then on dragging/resizing just
@@ -127,9 +230,37 @@ namespace GamingStackGUI
                     if (_terminalLines.Count > 300) _terminalLines.RemoveAt(0);
                 }
             };
+            _installer.OnItemResult += result =>
+            {
+                lock (_itemResultLock) { _itemResults.Add(result); }
+
+                // Achievement checks - these fire from the installer's background
+                // task, hence going through UnlockAchievement's own lock rather than
+                // touching the toast queue directly.
+                if (result.Kind == InstallResultKind.Installed)
+                    UnlockAchievement("first_blood");
+
+                if (result.Kind == InstallResultKind.Failed)
+                    UnlockAchievement("not_meant_to_be");
+
+                if (result.Kind == InstallResultKind.Skipped && result.Detail != null &&
+                    result.Detail.Contains("already", StringComparison.OrdinalIgnoreCase) &&
+                    result.Detail.Contains("up to date", StringComparison.OrdinalIgnoreCase))
+                    UnlockAchievement("already_perfect");
+
+                if (result.Entry.FriendlyName.Contains("VC++ Redistributables", StringComparison.OrdinalIgnoreCase) &&
+                    result.Kind != InstallResultKind.Failed)
+                    UnlockAchievement("redistributable_rampage");
+            };
             _installer.OnFinished += () =>
             {
-                _wizardPhase = WizardPhase.Farewell;
+                // Checked against _phaseWatch before it gets restarted below - at this
+                // point it's been running since StartInstall() kicked the Installing
+                // phase off, so its elapsed time is the whole install run's duration.
+                if (_selectedApps.Count > 0 && _phaseWatch.ElapsedMilliseconds < SpeedrunThresholdMs)
+                    UnlockAchievement("speedrunner");
+
+                _wizardPhase = WizardPhase.Summary;
                 _phaseWatch.Restart();
             };
 
@@ -159,6 +290,7 @@ namespace GamingStackGUI
             TopMost = true;
 
             LoadEmbeddedSound();
+            LoadTypewriterTickSound();
             LoadEmbeddedWallpaper();
             BuildBiosTimeline();
             _stageWatch.Restart();
@@ -194,6 +326,119 @@ namespace GamingStackGUI
             {
                 // Non-fatal - the boot animation still runs, just without sound.
             }
+        }
+
+        // Synthesized rather than an embedded .wav - cheaper (and one less binary
+        // asset to ship) to generate a tiny PCM WAV in memory than to source/record a
+        // real sample. A real typewriter/RE-save-point "clack" isn't one tone - it's
+        // three layered pieces happening in the first ~50ms: a very brief broadband
+        // strike (the key hitting the platen), a short high metallic tick (the type-bar
+        // itself), and a low-mid wooden/mechanical body resonance that carries the
+        // actual "clack" pitch and rings out longest. Mixing all three, each with its
+        // own short decay, is what makes it read as a mechanical object being struck
+        // rather than a beep or a single click.
+        private static byte[] GenerateTypewriterTickWav(int variantSeed)
+        {
+            const int sampleRate = 44100;
+            const double totalDurationSec = 0.055;
+            var sampleCount = (int)(sampleRate * totalDurationSec);
+
+            // Small per-variant jitter, so the handful of pre-rendered variants sound
+            // like the same typewriter struck slightly differently - not a robotically
+            // identical loop, but not a randomly different instrument each time either.
+            var rand = new Random(variantSeed);
+            var bodyFreq1 = 185 + rand.NextDouble() * 25;
+            var bodyFreq2 = 330 + rand.NextDouble() * 40;
+            var clickFreq = 3000 + rand.NextDouble() * 800;
+
+            var samples = new double[sampleCount];
+            for (int i = 0; i < sampleCount; i++)
+            {
+                var t = i / (double)sampleRate;
+
+                // 1) Initial broadband strike - raw noise, gone in ~2ms.
+                var strikeEnv = Math.Exp(-t / 0.0012);
+                var strike = (rand.NextDouble() * 2 - 1) * strikeEnv;
+
+                // 2) High metallic "tick" from the type-bar itself - brief and bright.
+                var clickEnv = Math.Exp(-t / 0.004);
+                var click = Math.Sin(2 * Math.PI * clickFreq * t) * clickEnv;
+
+                // 3) Low-mid mechanical body resonance - the actual "clack" tone,
+                // decaying over most of the clip's length.
+                var bodyEnv = Math.Exp(-t / 0.018);
+                var body = (Math.Sin(2 * Math.PI * bodyFreq1 * t) * 0.7 +
+                            Math.Sin(2 * Math.PI * bodyFreq2 * t) * 0.3) * bodyEnv;
+
+                samples[i] = strike * 0.45 + click * 0.3 + body * 0.6;
+            }
+
+            // Normalize so mixing the three layers never clips/distorts.
+            var peak = samples.Select(Math.Abs).DefaultIfEmpty(0).Max();
+            var scale = peak > 0 ? 0.9 / peak : 1.0;
+
+            var pcm = new short[sampleCount];
+            for (int i = 0; i < sampleCount; i++)
+                pcm[i] = (short)(samples[i] * scale * short.MaxValue);
+
+            using var ms = new MemoryStream();
+            using (var writer = new BinaryWriter(ms, System.Text.Encoding.ASCII, leaveOpen: true))
+            {
+                var dataSize = pcm.Length * 2;
+                writer.Write(System.Text.Encoding.ASCII.GetBytes("RIFF"));
+                writer.Write(36 + dataSize);
+                writer.Write(System.Text.Encoding.ASCII.GetBytes("WAVE"));
+                writer.Write(System.Text.Encoding.ASCII.GetBytes("fmt "));
+                writer.Write(16);
+                writer.Write((short)1);  // PCM
+                writer.Write((short)1);  // mono
+                writer.Write(sampleRate);
+                writer.Write(sampleRate * 2); // byte rate (sampleRate * blockAlign)
+                writer.Write((short)2);  // block align
+                writer.Write((short)16); // bits per sample
+                writer.Write(System.Text.Encoding.ASCII.GetBytes("data"));
+                writer.Write(dataSize);
+                foreach (var s in pcm) writer.Write(s);
+            }
+            return ms.ToArray();
+        }
+
+        // A small pool of pre-rendered variants, cycled round-robin, rather than one
+        // shared SoundPlayer: rapid typing retriggers the sound faster than one clip's
+        // tail finishes, and reusing a single SoundPlayer for that cuts the previous
+        // hit off abruptly. Separate instances let consecutive ticks overlap/ring
+        // naturally, and the slight per-variant pitch difference keeps a fast burst
+        // from sounding like a single tone stuttering.
+        private readonly SoundPlayer?[] _typewriterTickPlayers = new SoundPlayer?[4];
+        private int _typewriterTickIndex;
+
+        private void LoadTypewriterTickSound()
+        {
+            for (int v = 0; v < _typewriterTickPlayers.Length; v++)
+            {
+                try
+                {
+                    var ms = new MemoryStream(GenerateTypewriterTickWav(1000 + v));
+                    var player = new SoundPlayer(ms);
+                    player.Load();
+                    _typewriterTickPlayers[v] = player;
+                }
+                catch
+                {
+                    // Non-fatal - that slot just stays silent, others still play.
+                }
+            }
+        }
+
+        private void PlayTypewriterTick()
+        {
+            try
+            {
+                var player = _typewriterTickPlayers[_typewriterTickIndex];
+                _typewriterTickIndex = (_typewriterTickIndex + 1) % _typewriterTickPlayers.Length;
+                player?.Play();
+            }
+            catch { /* non-fatal */ }
         }
 
         private void LoadEmbeddedWallpaper()
@@ -257,6 +502,11 @@ namespace GamingStackGUI
                 Add(diskCursor, $"  {disk}", Color.LightGreen);
                 diskCursor += 300;
             }
+
+            // Disguised as an ordinary peripheral-detection line - this is the Konami
+            // code's only hint anywhere in the app, hidden in plain sight during POST.
+            Add(diskCursor, "Input Device: Standard 104-Key Keyboard (↑↑↓↓←→←→BA) - OK", Color.LightGreen);
+            diskCursor += 300;
 
             // Not added to the timed reveal - the "Press DEL" prompt is drawn separately
             // in PaintBios, pinned to the bottom of the screen and visible from frame
@@ -398,8 +648,56 @@ namespace GamingStackGUI
                     break;
 
                 case Stage.Terminal:
+                    // Achievement toast queue: pop the next one once nothing's showing,
+                    // and clear the current one once its total on-screen time is up.
+                    // Runs regardless of wizard phase - an achievement can unlock mid-
+                    // wizard (Completionist) or mid-install alike.
+                    if (_currentToast == null)
+                    {
+                        Achievement? next = null;
+                        lock (_achievementLock)
+                        {
+                            if (_pendingToasts.Count > 0) next = _pendingToasts.Dequeue();
+                        }
+                        if (next != null)
+                        {
+                            _currentToast = next;
+                            _toastWatch.Restart();
+                        }
+                    }
+                    else if (_toastWatch.ElapsedMilliseconds >= ToastTotalMs)
+                    {
+                        _currentToast = null;
+                    }
+
+                    // Typewriter tick: mirrors DrawWizard's own typedBudget calculation
+                    // (see WizardTypeCharsPerSecond) just to know whether new characters
+                    // appeared since the last tick, ~30 times/sec off the timer interval
+                    // - close enough to per-character to read as rapid typewriter
+                    // clatter without spamming overlapping sound playback.
+                    if (IsWizardTypingPhase(_wizardPhase))
+                    {
+                        var typingElapsedMs = Math.Max(0, _stageWatch.ElapsedMilliseconds - TerminalOpenMs);
+                        var typedBudget = (int)(typingElapsedMs / 1000.0 * WizardTypeCharsPerSecond);
+                        var clamped = Math.Min(typedBudget, GetWizardTotalChars());
+                        if (clamped > _wizardCharsRevealed)
+                        {
+                            _wizardCharsRevealed = clamped;
+                            PlayTypewriterTick();
+                        }
+                    }
+
                     if (_wizardPhase == WizardPhase.EasterEgg &&
                         _phaseWatch.ElapsedMilliseconds >= EasterEggHoldMs)
+                    {
+                        _wizardPhase = WizardPhase.Farewell;
+                        _phaseWatch.Restart();
+                    }
+
+                    // The shutdown outro is a beat, not a question - it plays itself
+                    // out and moves on to Farewell on its own, no keypress needed.
+                    if (_wizardPhase == WizardPhase.ShuttingDown &&
+                        _phaseWatch.ElapsedMilliseconds >= ShutdownAutoAdvanceMs)
                     {
                         _wizardPhase = WizardPhase.Farewell;
                         _phaseWatch.Restart();
@@ -412,6 +710,7 @@ namespace GamingStackGUI
 
         private void StartInstall()
         {
+            lock (_itemResultLock) { _itemResults.Clear(); }
             _wizardPhase = WizardPhase.Installing;
             _phaseWatch.Restart();
             _ = RunInstallerSafelyAsync();
@@ -433,6 +732,15 @@ namespace GamingStackGUI
 
         private void HandleWizardKey(Keys key)
         {
+            // Any key dismisses the summary - it's a report, not a Y/N question.
+            // Leads into the shutdown outro rather than straight to Farewell.
+            if (_wizardPhase == WizardPhase.Summary)
+            {
+                _wizardPhase = WizardPhase.ShuttingDown;
+                _phaseWatch.Restart();
+                return;
+            }
+
             bool? yn = key switch
             {
                 Keys.Y => true,
@@ -449,6 +757,7 @@ namespace GamingStackGUI
                     {
                         _selectedApps.Clear();
                         _selectedApps.AddRange(InstallerEngine.Catalog);
+                        UnlockAchievement("completionist");
                         StartInstall();
                     }
                     else
@@ -920,6 +1229,12 @@ namespace GamingStackGUI
                 case WizardPhase.Installing:
                     DrawInstallerLog(g, fullX, fullY, fullW, fullH, titleHeight, elapsed);
                     break;
+                case WizardPhase.Summary:
+                    DrawSummary(g, fullX, fullY, fullW, fullH, titleHeight);
+                    break;
+                case WizardPhase.ShuttingDown:
+                    DrawShuttingDown(g, fullX, fullY, fullW, fullH, titleHeight);
+                    break;
                 case WizardPhase.EasterEgg:
                     DrawEasterEgg(g, fullX, fullY, fullW, fullH, titleHeight, _phaseWatch.ElapsedMilliseconds);
                     break;
@@ -930,12 +1245,154 @@ namespace GamingStackGUI
                     DrawWizard(g, fullX, fullY, fullW, fullH, titleHeight);
                     break;
             }
+
+            DrawAchievementToast(g, fullX, fullY, fullW, fullH);
+        }
+
+        // Bottom-right achievement toast, drawn as an overlay on top of whatever phase
+        // is currently showing - an unlock can happen mid-wizard or mid-install, and
+        // shouldn't have to wait for a specific screen. Slides up, holds, then fades
+        // out; the queue (see Advance()) only ever shows one at a time.
+        private void DrawAchievementToast(Graphics g, int fullX, int fullY, int fullW, int fullH)
+        {
+            if (_currentToast == null) return;
+            var toast = _currentToast.Value;
+            var elapsed = _toastWatch.ElapsedMilliseconds;
+
+            // Roughly double the original size across the board - box, fonts, icon,
+            // padding - since the first pass read as too small to comfortably read.
+            // Capped against the window width for a small/resized terminal.
+            const int margin = 24;
+            var boxWidth = Math.Min(640, fullW - margin * 2);
+            const int padding = 22;
+            const int iconColumnWidth = 76;
+            const int headerLineHeight = 26;
+            const int titleLineHeight = 30;
+            const int subtitleLineHeight = 22;
+            const int maxSubtitleLines = 3; // defensive cap - real subtitles are one-liners
+
+            using var headerFont = new Font("Consolas", 14f, FontStyle.Bold);
+            using var titleFont = new Font("Consolas", 18f, FontStyle.Bold);
+            using var subtitleFont = new Font("Consolas", 14f, FontStyle.Regular);
+
+            // Box height is driven by the actual content, not a guessed constant - a
+            // long title or subtitle wraps onto extra lines instead of overflowing the
+            // box, which is exactly what was overlapping/getting cut off before.
+            var textAreaWidth = boxWidth - iconColumnWidth - padding * 2;
+            var titleLines = WrapTextToWidth(g, toast.Title, titleFont, textAreaWidth);
+            var subtitleLines = WrapTextToWidth(g, toast.Subtitle, subtitleFont, textAreaWidth);
+            if (subtitleLines.Count > maxSubtitleLines)
+                subtitleLines = subtitleLines.Take(maxSubtitleLines).ToList();
+
+            var contentHeight = headerLineHeight + titleLines.Count * titleLineHeight +
+                                 subtitleLines.Count * subtitleLineHeight;
+            var boxHeight = Math.Max(128, contentHeight + padding * 2);
+
+            // Slide up from just below the window edge, hold in place, then fade by
+            // dropping alpha rather than moving - a fade reads as "done", a slide back
+            // down reads as "still busy", which we don't want colliding with a toast
+            // that's about to be replaced by the next one in queue.
+            float slideProgress = Math.Clamp(elapsed / (float)ToastSlideInMs, 0f, 1f);
+            var eased = 1 - MathF.Pow(1 - slideProgress, 3);
+
+            int alpha;
+            if (elapsed < ToastSlideInMs + ToastHoldMs)
+            {
+                alpha = 255;
+            }
+            else
+            {
+                var fadeElapsed = elapsed - (ToastSlideInMs + ToastHoldMs);
+                var fadeProgress = Math.Clamp(fadeElapsed / (float)ToastFadeOutMs, 0f, 1f);
+                alpha = (int)(255 * (1 - fadeProgress));
+            }
+            if (alpha <= 0) return;
+
+            var boxX = fullX + fullW - boxWidth - margin;
+            var restY = fullY + fullH - boxHeight - margin;
+            var boxY = (int)(restY + boxHeight * (1 - eased)); // slides up into place
+
+            using var bgBrush = new SolidBrush(Color.FromArgb(alpha, 20, 20, 20));
+            using var borderPen = new Pen(Color.FromArgb(alpha, 255, 215, 0), 2); // gold
+            g.FillRectangle(bgBrush, boxX, boxY, boxWidth, boxHeight);
+            g.DrawRectangle(borderPen, boxX, boxY, boxWidth, boxHeight);
+
+            DrawPixelTrophy(g, boxX + 20, boxY + padding + 4, alpha);
+
+            using var headerBrush = new SolidBrush(Color.FromArgb(alpha, 255, 215, 0));
+            using var titleBrush = new SolidBrush(Color.FromArgb(alpha, 255, 255, 255));
+            using var subtitleBrush = new SolidBrush(Color.FromArgb(alpha, 180, 180, 180));
+
+            var textX = boxX + iconColumnWidth + padding;
+            var ty = boxY + padding;
+            g.DrawString("ACHIEVEMENT UNLOCKED", headerFont, headerBrush, textX, ty);
+            ty += headerLineHeight;
+
+            foreach (var line in titleLines)
+            {
+                g.DrawString(line, titleFont, titleBrush, textX, ty);
+                ty += titleLineHeight;
+            }
+
+            foreach (var line in subtitleLines)
+            {
+                g.DrawString(line, subtitleFont, subtitleBrush, textX, ty);
+                ty += subtitleLineHeight;
+            }
+        }
+
+        // A small original pixel-art trophy (rectangles/ellipses only) for the toast -
+        // not a reproduction of any real icon or brand.
+        private static void DrawPixelTrophy(Graphics g, int x, int y, int alpha)
+        {
+            using var cupBrush = new SolidBrush(Color.FromArgb(alpha, 255, 215, 0));
+            using var stemBrush = new SolidBrush(Color.FromArgb(alpha, 218, 165, 32));
+            g.FillRectangle(cupBrush, x + 8, y, 24, 24);
+            g.FillEllipse(cupBrush, x, y, 12, 20);
+            g.FillEllipse(cupBrush, x + 28, y, 12, 20);
+            g.FillRectangle(stemBrush, x + 16, y + 24, 8, 12);
+            g.FillRectangle(stemBrush, x + 10, y + 36, 20, 6);
         }
 
         // Cached across frames since the catalog never changes at runtime - no point
         // re-grouping and re-bin-packing 30-odd entries on every 33ms paint tick.
         private List<(string Category, List<int> Indices)>? _wizardColumn0;
         private List<(string Category, List<int> Indices)>? _wizardColumn1;
+
+        // Drives the typewriter tick sound (see Advance()) - tracks how many characters
+        // of the wizard's app list have been revealed so far, so a tick only plays when
+        // new text has actually appeared rather than once per timer tick regardless.
+        private int _wizardCharsRevealed;
+        private int? _wizardTotalCharsCache;
+
+        private static bool IsWizardTypingPhase(WizardPhase phase) => phase is
+            WizardPhase.ConfirmAll or WizardPhase.ChooseIndividually or
+            WizardPhase.PerApp or WizardPhase.ConfirmQuit;
+
+        // Total character count of the wizard's app list, for pacing the typewriter
+        // reveal/tick sound. This is deterministic from the catalog alone - the marker
+        // ("[x]"/"[ ]"/"-->"/"   ") is always 3 characters regardless of decision state,
+        // so per-app selection changes never change this total.
+        private int GetWizardTotalChars()
+        {
+            if (_wizardTotalCharsCache != null) return _wizardTotalCharsCache.Value;
+
+            BuildWizardColumnsIfNeeded();
+            var catalog = InstallerEngine.Catalog;
+            var total = 0;
+            foreach (var columnGroups in new[] { _wizardColumn0!, _wizardColumn1! })
+            {
+                foreach (var (category, indices) in columnGroups)
+                {
+                    total += $"-- {category} --".Length;
+                    foreach (var i in indices)
+                        total += $"    {catalog[i].FriendlyName}".Length; // 3-char marker + space
+                }
+            }
+
+            _wizardTotalCharsCache = total;
+            return total;
+        }
 
         private void BuildWizardColumnsIfNeeded()
         {
@@ -986,7 +1443,9 @@ namespace GamingStackGUI
         }
 
         // How fast the wizard's app list "types" itself out, in characters/second.
-        private const int WizardTypeCharsPerSecond = 420;
+        // Deliberately slow - this is meant to read like a Resident Evil
+        // typewriter save point, not a fast terminal dump. Was 420.
+        private const int WizardTypeCharsPerSecond = 60;
 
         private readonly struct WizardLine
         {
@@ -1152,6 +1611,244 @@ namespace GamingStackGUI
             }
         }
 
+        // Bin-packs only the categories/items that were actually attempted into two
+        // balanced columns, same greedy approach as BuildWizardColumnsIfNeeded but
+        // computed fresh each time (not cached - the wizard's full-catalog column
+        // split doesn't apply here, since most runs only attempt a subset, and
+        // reusing it left one column mostly empty while the other carried
+        // everything - the "misaligned" look from the first version of this screen).
+        // Greedy word-wrap a string to fit within maxWidth pixels for the given font -
+        // used for the summary screen's failure/skip reasons, which are free text of
+        // unpredictable length and used to just run straight off the edge of their
+        // column into whatever the neighboring column was drawing.
+        private static List<string> WrapTextToWidth(Graphics g, string text, Font font, float maxWidth)
+        {
+            var lines = new List<string>();
+            if (string.IsNullOrEmpty(text))
+            {
+                lines.Add(text ?? "");
+                return lines;
+            }
+
+            var current = "";
+            foreach (var word in text.Split(' '))
+            {
+                var candidate = current.Length == 0 ? word : current + " " + word;
+                if (current.Length > 0 && g.MeasureString(candidate, font).Width > maxWidth)
+                {
+                    lines.Add(current);
+                    current = word;
+                }
+                else
+                {
+                    current = candidate;
+                }
+            }
+            if (current.Length > 0 || lines.Count == 0) lines.Add(current);
+            return lines;
+        }
+
+        // Bin-packs only the attempted categories/items into two height-balanced
+        // columns, same idea as the wizard's own BuildWizardColumnsIfNeeded but built
+        // fresh each run since which items were attempted changes every time. Needs
+        // each item's already-wrapped detail line count (see WrapTextToWidth above) to
+        // balance accurately - a long reason wrapping to 3 lines has to count as 3 rows
+        // here, or the two columns drift out of sync with what's actually drawn and end
+        // up overlapping again exactly like before.
+        private static List<(string Category, List<int> Indices)>[] BuildSummaryColumns(
+            ItemResult[] results, Dictionary<AppEntry, List<string>> wrappedDetails)
+        {
+            var catalog = InstallerEngine.Catalog;
+
+            var groups = new List<(string Category, List<int> Indices)>();
+            for (int i = 0; i < catalog.Count; i++)
+            {
+                if (!results.Any(r => r.Entry == catalog[i])) continue;
+                var cat = catalog[i].Category;
+                var group = groups.FirstOrDefault(g => g.Category == cat);
+                if (group.Indices == null)
+                {
+                    group = (cat, new List<int>());
+                    groups.Add(group);
+                }
+                group.Indices.Add(i);
+            }
+
+            var col0 = new List<(string, List<int>)>();
+            var col1 = new List<(string, List<int>)>();
+            var height0 = 0;
+            var height1 = 0;
+            foreach (var group in groups)
+            {
+                // heading + spacer-after-heading + trailing spacer, plus one row per
+                // item and however many wrapped lines its detail text actually takes.
+                var blockHeight = 3 + group.Indices.Sum(i =>
+                    1 + (wrappedDetails.TryGetValue(catalog[i], out var lines) ? lines.Count : 0));
+                if (height0 <= height1) { col0.Add(group); height0 += blockHeight; }
+                else { col1.Add(group); height1 += blockHeight; }
+            }
+
+            return new[] { col0, col1 };
+        }
+
+        // End-of-run report: what actually happened to each selected item, grouped
+        // under category headings like the wizard's own list, but re-packed from
+        // only what was attempted (see BuildSummaryColumns) so a small selection
+        // doesn't leave one column empty and the other overflowing.
+        private void DrawSummary(Graphics g, int fullX, int fullY, int fullW, int fullH, int titleHeight)
+        {
+            var catalog = InstallerEngine.Catalog;
+            var contentX = fullX + 16;
+            const int lineHeight = 18;
+
+            ItemResult[] results;
+            lock (_itemResultLock) { results = _itemResults.ToArray(); }
+
+            var headingTop = fullY + titleHeight + 10 + lineHeight;
+            g.DrawString("Installation summary:", _mono, Brushes.Gainsboro, contentX, headingTop);
+
+            var totalsTop = headingTop + lineHeight + 4;
+            if (results.Length == 0)
+            {
+                g.DrawString("Nothing was selected - nothing was installed.", _monoSmall, Brushes.Gold, contentX, totalsTop);
+            }
+            else
+            {
+                var installed = results.Count(r => r.Kind == InstallResultKind.Installed);
+                var failed = results.Count(r => r.Kind == InstallResultKind.Failed);
+                var skipped = results.Count(r => r.Kind == InstallResultKind.Skipped);
+                g.DrawString($"{installed} installed    {failed} failed    {skipped} skipped",
+                    _monoSmall, Brushes.Gold, contentX, totalsTop);
+            }
+
+            var logLineTop = totalsTop + lineHeight + 2;
+            if (_installer.LogFilePath != null)
+                g.DrawString($"Full log: {_installer.LogFilePath}", _monoSmall, Brushes.DimGray, contentX, logLineTop);
+
+            var listTop = logLineTop + lineHeight + 10;
+            var colWidth = (fullW - 32) / 2;
+
+            // Room for the detail line's "    " indent plus a small gutter, so a long
+            // reason wraps onto extra lines within its own column instead of running
+            // straight into whatever the neighboring column is drawing.
+            var indentWidth = g.MeasureString("    ", _monoSmall).Width;
+            var detailMaxWidth = Math.Max(60f, colWidth - indentWidth - 12);
+
+            // Wrap every item's detail text once, up front - the column-balancing pass
+            // and the actual draw below both need the exact same wrapped line count, or
+            // they can disagree and the layout drifts back out of sync.
+            var wrappedDetails = new Dictionary<AppEntry, List<string>>();
+            foreach (var result in results)
+            {
+                if (result.Detail != null)
+                    wrappedDetails[result.Entry] = WrapTextToWidth(g, result.Detail, _monoSmall, detailMaxWidth);
+            }
+
+            var columnGroups = BuildSummaryColumns(results, wrappedDetails);
+            var maxRowsUsed = 0;
+
+            for (int col = 0; col < 2; col++)
+            {
+                var lx = contentX + col * colWidth;
+                var row = 0;
+
+                foreach (var (category, indices) in columnGroups[col])
+                {
+                    g.DrawString($"-- {category} --", _headingFont, Brushes.DeepSkyBlue, lx, listTop + row * lineHeight);
+                    row++;
+                    row++; // spacer after the heading, matching the wizard's spacing
+
+                    foreach (var i in indices)
+                    {
+                        var result = results.First(r => r.Entry == catalog[i]);
+                        var (marker, brush) = result.Kind switch
+                        {
+                            InstallResultKind.Installed => ("[x]", Brushes.LightGreen),
+                            InstallResultKind.Failed => ("[!]", Brushes.OrangeRed),
+                            _ => ("[-]", Brushes.Gray)
+                        };
+                        g.DrawString($"{marker} {catalog[i].FriendlyName}", _monoSmall, brush, lx, listTop + row * lineHeight);
+                        row++;
+
+                        // Show *why* it failed/was skipped right under the item, wrapped
+                        // to fit this column - so the reason is visible here instead of
+                        // buried in the scrolled-past install log or failed.txt, without
+                        // bleeding into the other column when it runs long.
+                        if (wrappedDetails.TryGetValue(catalog[i], out var detailLines))
+                        {
+                            foreach (var detailLine in detailLines)
+                            {
+                                g.DrawString($"    {detailLine}", _monoSmall, Brushes.DimGray, lx, listTop + row * lineHeight);
+                                row++;
+                            }
+                        }
+                    }
+                    row++; // spacer before the next category
+                }
+
+                maxRowsUsed = Math.Max(maxRowsUsed, row);
+            }
+
+            // Achievement tracker - just for the fun of it, not tied to what was
+            // actually attempted this run (unlike the breakdown above): every
+            // achievement that exists, and whether it's been earned across the whole
+            // session so far, not just this one run.
+            var achievementsTop = listTop + maxRowsUsed * lineHeight + 32;
+
+            HashSet<string> firedSnapshot;
+            lock (_achievementLock) { firedSnapshot = new HashSet<string>(_achievementsFired); }
+            var unlockedCount = AllAchievements.Count(a => firedSnapshot.Contains(a.Id));
+
+            g.DrawString($"-- Achievements ({unlockedCount}/{AllAchievements.Length}) --",
+                _headingFont, Brushes.DeepSkyBlue, contentX, achievementsTop);
+
+            const int achievementCols = 2;
+            var achievementColWidth = (fullW - 32) / achievementCols;
+            var achievementRowsPerCol = (AllAchievements.Length + achievementCols - 1) / achievementCols;
+            var achievementListTop = achievementsTop + lineHeight + 10;
+            var achievementDescMaxWidth = Math.Max(60f, achievementColWidth - 24);
+
+            // Each entry now takes a title row plus however many wrapped description
+            // lines it needs, so - same lesson as the per-item breakdown above - each
+            // column tracks its own running row count instead of assuming a fixed
+            // height per entry, or a long description would overlap the row below it.
+            var achievementMaxRows = 0;
+            for (int col = 0; col < achievementCols; col++)
+            {
+                var lx = contentX + col * achievementColWidth;
+                var row = 0;
+                var startIndex = col * achievementRowsPerCol;
+                var endIndex = Math.Min(AllAchievements.Length, startIndex + achievementRowsPerCol);
+
+                for (int i = startIndex; i < endIndex; i++)
+                {
+                    var achievement = AllAchievements[i];
+                    var unlocked = firedSnapshot.Contains(achievement.Id);
+                    var marker = unlocked ? "[x]" : "[ ]";
+                    var brush = unlocked ? Brushes.Gold : Brushes.Gray;
+
+                    g.DrawString($"{marker} {achievement.Title}", _monoSmall, brush,
+                        lx, achievementListTop + row * lineHeight);
+                    row++;
+
+                    var descLines = WrapTextToWidth(g, achievement.Subtitle, _monoSmall, achievementDescMaxWidth);
+                    foreach (var line in descLines)
+                    {
+                        g.DrawString($"    {line}", _monoSmall, Brushes.DimGray, lx, achievementListTop + row * lineHeight);
+                        row++;
+                    }
+
+                    row++; // spacer between achievements, so entries don't run together
+                }
+
+                achievementMaxRows = Math.Max(achievementMaxRows, row);
+            }
+
+            var promptTop = achievementListTop + achievementMaxRows * lineHeight + 16;
+            using var promptFont = new Font("Consolas", 14f, FontStyle.Bold);
+            g.DrawString("Press any key to continue...", promptFont, Brushes.Gold, contentX, promptTop);
+        }
+
         // A little original mascot for the "didn't want to choose, didn't want to quit
         // either" branch - a wobbling floppy disk with a speech bubble. Fully original
         // shapes (rectangles/ellipses), not a reproduction of any real character.
@@ -1215,6 +1912,61 @@ namespace GamingStackGUI
 
         // The sign-off screen, styled like an old text-mode "installation complete"
         // box - reached either after a real install finishes or after the easter egg.
+        // Fake "shutting down" outro, played dead straight in Windows 9x style: a
+        // handful of staged status lines typed out over a couple of seconds, then a
+        // full "It's now safe to turn off your computer" beat (the classic screen,
+        // framed inside our own fake terminal - a screen within the screen) before
+        // auto-advancing to Farewell. This is a beat, not a question, so it plays
+        // itself out with no keypress needed (see Advance()'s ShutdownAutoAdvanceMs).
+        private const long ShutdownLine1At = 0;
+        private const long ShutdownLine2At = 900;
+        private const long ShutdownLine3At = 1800;
+        private const long ShutdownLine4At = 3000;
+        private const long ShutdownFinalAt = 4400;
+        private const long ShutdownAutoAdvanceMs = ShutdownFinalAt + 2600;
+
+        private void DrawShuttingDown(Graphics g, int fullX, int fullY, int fullW, int fullH, int titleHeight)
+        {
+            var elapsed = _phaseWatch.ElapsedMilliseconds;
+
+            if (elapsed >= ShutdownFinalAt)
+            {
+                var contentX = fullX + 1;
+                var contentY = fullY + titleHeight + 1;
+                var contentW = fullW - 2;
+                var contentH = fullH - titleHeight - 2;
+                using var bg = new SolidBrush(Color.FromArgb(0, 0, 128)); // classic shutdown-screen navy
+                g.FillRectangle(bg, contentX, contentY, contentW, contentH);
+
+                using var bigFont = new Font("Consolas", 20f, FontStyle.Bold);
+                const string message = "It's now safe to turn off your computer.";
+                var size = g.MeasureString(message, bigFont);
+                g.DrawString(message, bigFont, Brushes.White,
+                    fullX + (fullW - size.Width) / 2, fullY + (fullH - size.Height) / 2);
+                return;
+            }
+
+            var contentX2 = fullX + 16;
+            const int lineHeight = 22;
+            var top = fullY + titleHeight + 30;
+
+            (long At, string Text)[] lines =
+            {
+                (ShutdownLine1At, "Saving your settings..."),
+                (ShutdownLine2At, "Closing GamingStack Installer..."),
+                (ShutdownLine3At, "GamingStack has finished configuring your PC."),
+                (ShutdownLine4At, "Shutting down..."),
+            };
+
+            var row = 0;
+            foreach (var (at, text) in lines)
+            {
+                if (elapsed < at) continue;
+                g.DrawString(text, _mono, Brushes.LimeGreen, contentX2, top + row * lineHeight);
+                row++;
+            }
+        }
+
         private void DrawFarewell(Graphics g, int fullX, int fullY, int fullW, int fullH, int titleHeight)
         {
             using var textFont = new Font("Consolas", 13f, FontStyle.Regular);
@@ -1292,6 +2044,8 @@ namespace GamingStackGUI
         protected override void OnKeyDown(KeyEventArgs e)
         {
             base.OnKeyDown(e);
+
+            CheckKonamiCode(e.KeyCode);
 
             if (_stage == Stage.Bios && e.KeyCode == Keys.Delete)
             {

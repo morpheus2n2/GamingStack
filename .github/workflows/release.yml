@@ -16,10 +16,10 @@ jobs:
     runs-on: windows-latest
     steps:
       - name: Check out repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up .NET 8
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: "8.0.x"
 
@@ -40,7 +40,7 @@ jobs:
       # not) so a manual workflow_dispatch run gives you something to
       # download and test before you commit to tagging a real release.
       - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: GamingStack-${{ github.ref_name }}
           path: ${{ steps.locate.outputs.exePath }}

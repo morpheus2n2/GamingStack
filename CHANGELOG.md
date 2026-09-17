@@ -11,6 +11,45 @@ Everything below `0.6.2` predates versioning entirely, so those entries are
 backfilled from the original milestone-based changelog and given version
 numbers retroactively - there's no real date for them, only relative order.
 
+## [0.13.2] - Konami clue grouping fix
+
+### Fixed
+- The disguised Konami-code hint line was tacked directly onto the Storage
+  Devices list with no heading of its own, so it read as just another disk
+  entry. It now gets its own "Input Devices:" heading first, matching the
+  Graphics Adapter/Storage Devices pattern used everywhere else on the BIOS
+  screen.
+
+## [0.13.1] - Motherboard on the BIOS screen
+
+### Added
+- The fake BIOS POST screen now also reads and displays the real motherboard
+  (manufacturer + model, via `Win32_BaseBoard`), between the BIOS banner and
+  the CPU line - same real-hardware-reading approach as CPU/RAM/GPU/disks.
+
+## [0.13.0] - Pixel-art boot animation assets
+
+### Added
+- **Real hand-pixelled boot animation art**, replacing the procedural GDI+
+  shapes: an original sun, a rolling-hills silhouette, blocky clouds, and a
+  waving flag that now animates off a 16-frame pre-baked sprite sheet
+  instead of a live per-pixel sine wave - all drawn with NearestNeighbor
+  scaling so they stay crisp and chunky when scaled up fullscreen, the same
+  way a real retro sprite animation would look.
+- New embedded resources: `cloud.png`, `sun.png`, `hills.png`,
+  `flag_sheet.png` - all original artwork made for this project (see
+  Credits & copyright in the README), tiny hand-authored low-res PNGs, not
+  photos or scanned assets.
+- Every sprite draw falls back to the old procedural shapes if its resource
+  fails to load for some reason, so the boot animation never breaks outright
+  over a missing asset.
+
+### Changed
+- Flag narrowed and moved higher up the scene (was sitting low and a bit
+  too wide for the frame); the hills silhouette dropped further down toward
+  the horizon and made taller, so the layers read as proper background/
+  foreground depth instead of everything clustering in the middle.
+
 ## [0.12.0] - Konami code easter egg
 
 ### Added

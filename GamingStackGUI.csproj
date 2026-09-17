@@ -10,9 +10,9 @@
 
     <!-- Bump this alongside CHANGELOG.md - see "Versioning" in CLAUDE.md for the
          minor-vs-patch rule. Shows up in the built exe's file properties. -->
-    <Version>0.12.0</Version>
-    <AssemblyVersion>0.12.0.0</AssemblyVersion>
-    <FileVersion>0.12.0.0</FileVersion>
+    <Version>0.13.2</Version>
+    <AssemblyVersion>0.13.2.0</AssemblyVersion>
+    <FileVersion>0.13.2.0</FileVersion>
 
     <!-- Debug uses asInvoker so `dotnet run`/F5 debugging works without hitting
          "the requested operation requires elevation" (CreateProcess can't silently
@@ -40,5 +40,13 @@
     <!-- Embedded properly - no separate files to lose on a different machine -->
     <EmbeddedResource Include="Resources\win95.wav" />
     <EmbeddedResource Include="Resources\wallpaper.jpg" />
+    <!-- Original hand-pixelled boot animation art (see gen_assets in the repo's
+         tooling notes) - a cloud, a sun, a tileable hills strip, and a pre-baked
+         waving-flag sprite sheet, all drawn with NearestNeighbor scaling so they
+         stay crisp pixel art rather than blurring when scaled up fullscreen. -->
+    <EmbeddedResource Include="Resources\cloud.png" />
+    <EmbeddedResource Include="Resources\sun.png" />
+    <EmbeddedResource Include="Resources\hills.png" />
+    <EmbeddedResource Include="Resources\flag_sheet.png" />
   </ItemGroup>
 </Project>

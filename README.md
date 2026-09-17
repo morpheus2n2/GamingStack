@@ -6,7 +6,7 @@
 ![Platform](https://img.shields.io/badge/platform-Windows-blue)
 ![.NET](https://img.shields.io/badge/.NET-8.0-purple)
 ![Status](https://img.shields.io/badge/status-WIP-orange)
-[![Version](https://img.shields.io/badge/version-0.12.0-brightgreen.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.13.2-brightgreen.svg)](CHANGELOG.md)
 
 A fully automated, over-the-top retro-styled Windows 11 gaming setup app.
 Boots through a fake BIOS screen (pulling your *real* CPU/RAM/GPU/disk info),
@@ -17,12 +17,14 @@ lose. Download it, run it, walk away.
 
 ## Features
 
-- **Fake BIOS POST screen** — genuinely reads your CPU, RAM, GPU and disks
-  and displays them like a real boot screen, including an animated memory
-  count-up with tick beeps
-- **Original retro boot animation** — gradient sky, drifting pixel clouds,
-  and an animated waving flag (all original artwork — no real Windows
-  assets are used, see [Credits & copyright](#credits--copyright))
+- **Fake BIOS POST screen** — genuinely reads your motherboard, CPU, RAM,
+  GPU and disks and displays them like a real boot screen, including an
+  animated memory count-up with tick beeps
+- **Original retro boot animation** — gradient sky, a hand-pixelled sun,
+  a rolling-hills silhouette, drifting pixel clouds, and a waving flag that
+  animates off a pre-baked sprite sheet, all hand-authored pixel art scaled
+  up crisp and chunky (no real Windows assets are used, see
+  [Credits & copyright](#credits--copyright))
 - **Desktop stage** with a taskbar (live clock), desktop icons, and a
   wallpaper
 - **Interactive install wizard**, running inside a terminal window that
@@ -157,7 +159,7 @@ expected.
 - [x] Fake "shutting down" outro
 - [x] Achievement toast notifications
 - [x] Konami code easter egg
-- [ ] Real boot animation assets (currently original placeholder artwork)
+- [x] Real boot animation assets (hand-pixelled sprites, original artwork)
 
 ## Safety note
 
@@ -169,11 +171,11 @@ before running it on anything you care about, and review the app list in
 ## Credits & copyright
 
 The retro aesthetic here is inspired by classic BIOS boot screens and
-Windows 9x, but every visual asset (the logo, the flag animation, the
-clouds, the icons, the BSOD easter egg text) is original artwork made for
-this project — no Microsoft logos, boot animations, or copyrighted assets
-are included or redistributed. The banner image above and the desktop
-wallpaper are AI-generated.
+Windows 9x, but every visual asset (the logo, the boot animation's sun,
+hills, clouds and flag sprites, the icons, the BSOD easter egg text) is
+original artwork made for this project — no Microsoft logos, boot
+animations, or copyrighted assets are included or redistributed. The
+banner image above and the desktop wallpaper are AI-generated.
 
 ## License
 

@@ -76,6 +76,21 @@ namespace GamingStackGUI
         private SoundPlayer? _soundPlayer;
         private Image? _wallpaper;
 
+        // ---- boot animation sprites ----
+        // Hand-authored, low-resolution pixel-art PNGs (see Resources/) drawn with
+        // NearestNeighbor scaling so upscaling them for a fullscreen boot animation
+        // keeps the chunky, blocky look rather than smoothing it into a blur. The
+        // flag is a sprite-sheet of pre-baked wave frames rather than a live
+        // per-pixel simulation, same as a real retro sprite animation would be.
+        private Image? _cloudSprite;
+        private Image? _sunSprite;
+        private Image? _hillsSprite;
+        private Image? _flagSheet;
+        private const int FlagFrameWidth = 48;
+        private const int FlagFrameHeight = 28;
+        private const int FlagFrameCount = 16;
+        private const double FlagFramesPerSecond = 10.0;
+
         private readonly Font _mono = new("Consolas", 14f, FontStyle.Regular);
         private readonly Font _monoSmall = new("Consolas", 12f, FontStyle.Regular);
         private readonly Font _headingFont = new("Consolas", 12f, FontStyle.Bold | FontStyle.Underline);
@@ -292,6 +307,7 @@ namespace GamingStackGUI
             LoadEmbeddedSound();
             LoadTypewriterTickSound();
             LoadEmbeddedWallpaper();
+            LoadBootSprites();
             BuildBiosTimeline();
             _stageWatch.Restart();
             _timer.Start();
@@ -459,6 +475,33 @@ namespace GamingStackGUI
             }
         }
 
+        private static Image? LoadEmbeddedImage(string suffix)
+        {
+            using var stream = FindEmbeddedResource(suffix);
+            if (stream == null) return null;
+
+            var ms = new MemoryStream();
+            stream.CopyTo(ms);
+            ms.Position = 0;
+            return Image.FromStream(ms);
+        }
+
+        private void LoadBootSprites()
+        {
+            try
+            {
+                _cloudSprite = LoadEmbeddedImage("cloud.png");
+                _sunSprite = LoadEmbeddedImage("sun.png");
+                _hillsSprite = LoadEmbeddedImage("hills.png");
+                _flagSheet = LoadEmbeddedImage("flag_sheet.png");
+            }
+            catch
+            {
+                // Non-fatal - PaintBoot falls back to procedural shapes for anything
+                // that didn't load.
+            }
+        }
+
         private static void PlayBeepAsync(int freq, int durationMs)
         {
             Task.Run(() =>
@@ -479,6 +522,9 @@ namespace GamingStackGUI
 
             Add(0, "American Megatrends Inc.", Color.Gainsboro);
             Add(150, "GAMINGSTACK-UEFI BIOS v2.1.0", Color.Gray);
+
+            var board = GetMotherboard();
+            Add(700, $"Mainboard: {board}", Color.Gainsboro);
 
             var cpu = GetWmiString("Win32_Processor", "Name");
             Add(1200, $"CPU: {cpu}", Color.Gainsboro);
@@ -503,15 +549,36 @@ namespace GamingStackGUI
                 diskCursor += 300;
             }
 
-            // Disguised as an ordinary peripheral-detection line - this is the Konami
-            // code's only hint anywhere in the app, hidden in plain sight during POST.
-            Add(diskCursor, "Input Device: Standard 104-Key Keyboard (↑↑↓↓←→←→BA) - OK", Color.LightGreen);
-            diskCursor += 300;
+            // Its own heading (matching the Graphics Adapter/Storage Devices pattern
+            // above) rather than tacking onto the disk list - it was reading as just
+            // another storage entry before. Disguised as an ordinary peripheral
+            // detection line either way - this is the Konami code's only hint
+            // anywhere in the app, hidden in plain sight during POST.
+            Add(diskCursor, "Input Devices:", Color.Gainsboro);
+            Add(diskCursor + 300, "  Standard 104-Key Keyboard (↑↑↓↓←→←→BA) - OK", Color.LightGreen);
+            diskCursor += 600;
 
             // Not added to the timed reveal - the "Press DEL" prompt is drawn separately
             // in PaintBios, pinned to the bottom of the screen and visible from frame
             // one. _footerAt is still used to time the footer beep below.
             _footerAt = diskCursor + 400;
+        }
+
+        private static string GetMotherboard()
+        {
+            var manufacturer = GetWmiString("Win32_BaseBoard", "Manufacturer");
+            var product = GetWmiString("Win32_BaseBoard", "Product");
+
+            if (manufacturer == "Unknown" && product == "Unknown") return "Unknown";
+            if (manufacturer == "Unknown") return product;
+            if (product == "Unknown") return manufacturer;
+
+            // Some boards report the manufacturer name as part of Product already
+            // (e.g. "ASUSTeK COMPUTER INC." + "ROG STRIX Z790-E") - avoid a stutter
+            // like "ASUSTeK COMPUTER INC. ASUSTeK COMPUTER INC. ROG STRIX Z790-E".
+            return product.Contains(manufacturer, StringComparison.OrdinalIgnoreCase)
+                ? product
+                : $"{manufacturer} {product}";
         }
 
         private static string GetWmiString(string wmiClass, string property)
@@ -932,6 +999,28 @@ namespace GamingStackGUI
             g.FillRectangle(sky, 0, 0, Width, Height);
         }
 
+        private void DrawSun(Graphics g)
+        {
+            if (_sunSprite == null) return;
+            const int size = 90;
+            DrawPixelSprite(g, _sunSprite, Width - size - 60, 50, size, size);
+        }
+
+        private void DrawHills(Graphics g, double t)
+        {
+            if (_hillsSprite == null) return;
+
+            const int stripHeight = 200;
+            var y = Height - 175 - stripHeight;
+            var stripWidth = _hillsSprite.Width * (stripHeight / (double)_hillsSprite.Height);
+            var distance = (t * 6 * CloudSpeedMultiplier) % stripWidth; // slow parallax drift
+
+            // Tile the strip twice, offset by the scroll distance, so it wraps
+            // seamlessly across the full window width with no visible gap.
+            for (var x = -distance; x < Width; x += stripWidth)
+                DrawPixelSprite(g, _hillsSprite, (int)x, y, (int)Math.Ceiling(stripWidth) + 1, stripHeight);
+        }
+
         private void DrawClouds(Graphics g, double t)
         {
             DrawCloud(g, 90, 60, 18 * CloudSpeedMultiplier, t);
@@ -951,20 +1040,45 @@ namespace GamingStackGUI
             var distance = (t * speedPxPerSec) % (Width + cloudWidth);
             var x = Width - distance;
 
-            using var brush = new SolidBrush(Color.FromArgb(230, 235, 245));
-            g.FillEllipse(brush, (float)x, baseY, size * 1.4f, size * 0.8f);
-            g.FillEllipse(brush, (float)x + size * 0.6f, baseY - size * 0.2f, size * 1.2f, size * 0.9f);
-            g.FillEllipse(brush, (float)x + size * 1.3f, baseY, size * 1.1f, size * 0.7f);
+            if (_cloudSprite == null)
+            {
+                // Fallback if the embedded sprite failed to load for some reason.
+                using var brush = new SolidBrush(Color.FromArgb(230, 235, 245));
+                g.FillEllipse(brush, (float)x, baseY, size * 1.4f, size * 0.8f);
+                g.FillEllipse(brush, (float)x + size * 0.6f, baseY - size * 0.2f, size * 1.2f, size * 0.9f);
+                g.FillEllipse(brush, (float)x + size * 1.3f, baseY, size * 1.1f, size * 0.7f);
+                return;
+            }
+
+            var drawH = size;
+            var drawW = size * (_cloudSprite.Width / (double)_cloudSprite.Height);
+            DrawPixelSprite(g, _cloudSprite, (int)x, baseY, (int)drawW, drawH);
+        }
+
+        // Draws a low-res sprite scaled up with nearest-neighbor sampling, so it
+        // stays crisp and blocky instead of blurring into a smooth gradient - the
+        // whole point of hand-pixelled boot-animation art over the old procedural
+        // shapes.
+        private static void DrawPixelSprite(Graphics g, Image sprite, int x, int y, int w, int h)
+        {
+            var prevInterpolation = g.InterpolationMode;
+            var prevPixelOffset = g.PixelOffsetMode;
+            g.InterpolationMode = InterpolationMode.NearestNeighbor;
+            g.PixelOffsetMode = PixelOffsetMode.Half;
+            g.DrawImage(sprite, x, y, w, h);
+            g.InterpolationMode = prevInterpolation;
+            g.PixelOffsetMode = prevPixelOffset;
         }
 
         private void DrawWavingFlag(Graphics g, double t)
         {
-            const int flagWidth = 460, flagHeight = 190, stripCount = 72;
+            const int flagWidth = 360, flagHeight = 150, stripCount = 72;
             const int reservedBottom = 200;   // leave room for the title + progress bar below
             const int poleHeight = 320;
+            const int raiseBy = 50;   // nudge the whole pole+flag group higher, off the horizon
 
             int poleX = (Width - flagWidth) / 2;
-            int poleTopY = Math.Max(40, (Height - reservedBottom - poleHeight) / 2);
+            int poleTopY = Math.Max(40, (Height - reservedBottom - poleHeight) / 2 - raiseBy);
 
             using var polePen = new Pen(Color.Silver, 6);
             g.DrawLine(polePen, poleX, poleTopY, poleX, poleTopY + poleHeight);
@@ -972,26 +1086,49 @@ namespace GamingStackGUI
 
             int flagX = poleX;
             int flagY = poleTopY + 18;
-            float stripW = flagWidth / (float)stripCount;
-            float third = flagHeight / 3f;
 
-            using var bandTop = new SolidBrush(Color.FromArgb(0, 210, 230));
-            using var bandMid = new SolidBrush(Color.FromArgb(18, 16, 36));
-            using var bandBot = new SolidBrush(Color.FromArgb(255, 0, 170));
-
-            for (int i = 0; i < stripCount; i++)
+            if (_flagSheet == null)
             {
-                float localX = i * stripW;
-                float wave = (float)(Math.Sin((localX * 0.06) + t * 2.1) * 18.0);
-                float attachFactor = Math.Min(1f, localX / 40f);
-                wave *= attachFactor;
+                // Fallback if the embedded sprite sheet failed to load - the old
+                // live per-strip sine wave, so the animation still runs either way.
+                float stripW = flagWidth / (float)stripCount;
+                float third = flagHeight / 3f;
 
-                float sx = flagX + localX;
-                float sy = flagY + wave;
+                using var bandTop = new SolidBrush(Color.FromArgb(0, 210, 230));
+                using var bandMid = new SolidBrush(Color.FromArgb(18, 16, 36));
+                using var bandBot = new SolidBrush(Color.FromArgb(255, 0, 170));
 
-                g.FillRectangle(bandTop, sx, sy, stripW + 1, third);
-                g.FillRectangle(bandMid, sx, sy + third, stripW + 1, third);
-                g.FillRectangle(bandBot, sx, sy + third * 2, stripW + 1, third);
+                for (int i = 0; i < stripCount; i++)
+                {
+                    float localX = i * stripW;
+                    float wave = (float)(Math.Sin((localX * 0.06) + t * 2.1) * 18.0);
+                    float attachFactor = Math.Min(1f, localX / 40f);
+                    wave *= attachFactor;
+
+                    float sx = flagX + localX;
+                    float sy = flagY + wave;
+
+                    g.FillRectangle(bandTop, sx, sy, stripW + 1, third);
+                    g.FillRectangle(bandMid, sx, sy + third, stripW + 1, third);
+                    g.FillRectangle(bandBot, sx, sy + third * 2, stripW + 1, third);
+                }
+            }
+            else
+            {
+                // Pick the current frame from the pre-baked wave sprite sheet, same
+                // idea as a classic sprite-sheet animation rather than a live
+                // per-pixel simulation.
+                var frame = (int)(t * FlagFramesPerSecond) % FlagFrameCount;
+                var srcRect = new Rectangle(frame * FlagFrameWidth, 0, FlagFrameWidth, FlagFrameHeight);
+                var destRect = new Rectangle(flagX, flagY, flagWidth, flagHeight);
+
+                var prevInterpolation = g.InterpolationMode;
+                var prevPixelOffset = g.PixelOffsetMode;
+                g.InterpolationMode = InterpolationMode.NearestNeighbor;
+                g.PixelOffsetMode = PixelOffsetMode.Half;
+                g.DrawImage(_flagSheet, destRect, srcRect, GraphicsUnit.Pixel);
+                g.InterpolationMode = prevInterpolation;
+                g.PixelOffsetMode = prevPixelOffset;
             }
 
             using var flagFont = new Font("Consolas", 26f, FontStyle.Bold);
@@ -1007,6 +1144,8 @@ namespace GamingStackGUI
             var t = elapsed / 1000.0;
 
             DrawSky(g);
+            DrawSun(g);
+            DrawHills(g, t);
             DrawClouds(g, t);
             DrawWavingFlag(g, t);
 
@@ -2123,6 +2262,10 @@ namespace GamingStackGUI
         {
             _soundPlayer?.Dispose();
             _wallpaper?.Dispose();
+            _cloudSprite?.Dispose();
+            _sunSprite?.Dispose();
+            _hillsSprite?.Dispose();
+            _flagSheet?.Dispose();
             base.OnFormClosed(e);
         }
     }

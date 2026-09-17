@@ -6,6 +6,7 @@
 ![Platform](https://img.shields.io/badge/platform-Windows-blue)
 ![.NET](https://img.shields.io/badge/.NET-8.0-purple)
 ![Status](https://img.shields.io/badge/status-WIP-orange)
+[![Version](https://img.shields.io/badge/version-0.6.2-brightgreen.svg)](CHANGELOG.md)
 
 A fully automated, over-the-top retro-styled Windows 11 gaming setup app.
 Boots through a fake BIOS screen (pulling your *real* CPU/RAM/GPU/disk info),
@@ -25,11 +26,13 @@ lose. Download it, run it, walk away.
 - **Desktop stage** with a taskbar (live clock), desktop icons, and a
   wallpaper
 - **Interactive install wizard**, running inside a terminal window that
-  animates open: shows the full app list with friendly names, then asks
-  whether to install everything, pick items one by one, or bail out —
-  see [How the install works](#how-the-install-works) below
+  animates open: shows the full app list grouped under a heading per
+  category, then asks whether to install everything, pick items one by
+  one, or bail out — see [How the install works](#how-the-install-works)
+  below
 - **Real installer**: installs the selected apps via `winget` with
-  retries, handles a couple of apps that need manual download/install,
+  retries, silently installs every VC++ Redistributable version as one
+  bundled entry, handles a few apps that need manual download/install,
   and applies a few gaming-related tweaks (Game Mode, hardware-accelerated
   GPU scheduling, High Performance power plan)
 - **Easter eggs** — press <kbd>Delete</kbd> during the BIOS screen for a
@@ -54,18 +57,32 @@ of what's on offer and asks:
 
 ## What it installs
 
-Game launchers (Steam, Epic, GOG, Ubisoft Connect, Battle.net, Amazon
-Games, Playnite to tie them all together), streaming/recording tools (OBS
-Studio, Streamlabs, Medal, Voicemeeter Banana), monitoring/utility apps
-(HWiNFO, CPU-Z, Speccy, CrystalDiskInfo, Process Lasso), and general
-utilities (VS Code, PowerShell, Office, PowerToys, Python, VLC, 7-Zip).
+The wizard groups everything under a heading per category:
+
+- **Game Launchers** — Steam, Epic, GOG, Ubisoft Connect, Battle.net,
+  Amazon Games, Discord, Playnite to tie the launchers together
+- **Monitoring & Performance** — NVIDIA App, HWiNFO, CPU-Z, Speccy,
+  CrystalDiskInfo, Process Lasso, Razer Cortex
+- **Streaming & Recording** — Streamlabs Desktop, Medal.tv, Voicemeeter
+  Banana
+- **General Utilities** — VS Code, PowerShell 7, Microsoft 365 Apps,
+  PowerToys, Python 3, VLC, 7-Zip, Vortex Mod Manager
+- **Redistributables** — a single "VC++ Redistributables Pack" entry that
+  silently installs every VC++ runtime version (2005 through 2015+, x86
+  and x64) in one go, since so many games and creator apps quietly expect
+  one of these already being present
+- **RGB & Peripheral Control** — Corsair iCUE, Razer Synapse, OpenRGB (a
+  single open-source app that talks to several vendors' hardware at once,
+  handy if you don't want four separate vendor apps running), plus Hyte
+  Nexus and L-Connect 3
+
 The full list — and how to change it — is the `Catalog` in
 `InstallerEngine.cs`.
 
-A couple of apps with no reliable `winget` package (Hyte Nexus, L-Connect 3)
-are downloaded and installed directly instead, but sit in the same
-pickable list as everything else so you can skip them if you don't own
-that hardware.
+Apps with no reliable `winget` package (Hyte Nexus, L-Connect 3) are
+downloaded and installed directly instead, but sit in the same pickable
+list as everything else so you can skip them if you don't own that
+hardware.
 
 ## Requirements
 

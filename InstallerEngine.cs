@@ -10,20 +10,27 @@ using Microsoft.Win32;
 
 namespace GamingStackGUI
 {
-    public enum AppKind { Winget, Manual }
+    public enum AppKind { Winget, Manual, Bundle }
 
     /// <summary>
     /// One installable thing, with a human-friendly name for display in the wizard
     /// (the winget ID / manual URL are what actually gets run, kept separate so the
-    /// UI never has to show raw package IDs to the user).
+    /// UI never has to show raw package IDs to the user). <see cref="Category"/> is
+    /// purely for grouping the wizard's on-screen list under a heading - it plays no
+    /// part in install order or logic.
     /// </summary>
     public class AppEntry
     {
         public required string FriendlyName { get; init; }
+        public required string Category { get; init; }
         public required AppKind Kind { get; init; }
         public string? WingetId { get; init; }
         public string? ManualFileName { get; init; }
         public string? ManualUrl { get; init; }
+        // Bundle kind only: a handful of winget IDs installed back-to-back under one
+        // catalog entry (e.g. every VC++ Redistributable version), so the wizard shows
+        // a single friendly line instead of a dozen near-identical ones.
+        public string[]? BundleWingetIds { get; init; }
     }
 
     /// <summary>
@@ -42,51 +49,78 @@ namespace GamingStackGUI
 
         private static readonly HttpClient Http = new();
 
-        // The full catalog the wizard offers. Edit here to add/remove/rename what's
-        // on offer - friendly names are what the user sees, everything else is what
-        // actually gets run.
+        // The full catalog the wizard offers, grouped by Category purely for display -
+        // the wizard renders one heading per category, in the order categories first
+        // appear here. Edit here to add/remove/rename what's on offer - friendly names
+        // are what the user sees, everything else is what actually gets run.
+        //
+        // A few winget IDs below (marked inline) are the RGB/peripheral ecosystem apps
+        // - these vendors change their package IDs more often than most, so if one
+        // fails every time, run `winget search <vendor>` and fix the ID here.
         public static readonly IReadOnlyList<AppEntry> Catalog = new List<AppEntry>
         {
             // Launchers / core
-            new() { FriendlyName = "Discord", Kind = AppKind.Winget, WingetId = "Discord.Discord" },
-            new() { FriendlyName = "Steam", Kind = AppKind.Winget, WingetId = "Valve.Steam" },
-            new() { FriendlyName = "Ubisoft Connect", Kind = AppKind.Winget, WingetId = "Ubisoft.Connect" },
-            new() { FriendlyName = "Epic Games Launcher", Kind = AppKind.Winget, WingetId = "EpicGames.EpicGamesLauncher" },
-            new() { FriendlyName = "GOG Galaxy", Kind = AppKind.Winget, WingetId = "GOG.Galaxy" },
-            new() { FriendlyName = "Amazon Games", Kind = AppKind.Winget, WingetId = "Amazon.Games" },
-            new() { FriendlyName = "Battle.net", Kind = AppKind.Winget, WingetId = "Blizzard.BattleNet" },
-            new() { FriendlyName = "Playnite (unifies the above)", Kind = AppKind.Winget, WingetId = "Playnite.Playnite" },
+            new() { FriendlyName = "Discord", Category = "Game Launchers", Kind = AppKind.Winget, WingetId = "Discord.Discord" },
+            new() { FriendlyName = "Steam", Category = "Game Launchers", Kind = AppKind.Winget, WingetId = "Valve.Steam" },
+            new() { FriendlyName = "Ubisoft Connect", Category = "Game Launchers", Kind = AppKind.Winget, WingetId = "Ubisoft.Connect" },
+            new() { FriendlyName = "Epic Games Launcher", Category = "Game Launchers", Kind = AppKind.Winget, WingetId = "EpicGames.EpicGamesLauncher" },
+            new() { FriendlyName = "GOG Galaxy", Category = "Game Launchers", Kind = AppKind.Winget, WingetId = "GOG.Galaxy" },
+            new() { FriendlyName = "Amazon Games", Category = "Game Launchers", Kind = AppKind.Winget, WingetId = "Amazon.Games" },
+            new() { FriendlyName = "Battle.net", Category = "Game Launchers", Kind = AppKind.Winget, WingetId = "Blizzard.BattleNet" },
+            new() { FriendlyName = "Playnite (unifies the above)", Category = "Game Launchers", Kind = AppKind.Winget, WingetId = "Playnite.Playnite" },
 
-            // GPU / drivers / monitoring
-            new() { FriendlyName = "NVIDIA App", Kind = AppKind.Winget, WingetId = "Nvidia.App" },
-            new() { FriendlyName = "HWiNFO", Kind = AppKind.Winget, WingetId = "REALiX.HWiNFO" },
-            new() { FriendlyName = "CPU-Z", Kind = AppKind.Winget, WingetId = "CPUID.CPU-Z" },
-            new() { FriendlyName = "Speccy", Kind = AppKind.Winget, WingetId = "Piriform.Speccy" },
-            new() { FriendlyName = "CrystalDiskInfo", Kind = AppKind.Winget, WingetId = "CrystalDewWorld.CrystalDiskInfo" },
-            new() { FriendlyName = "Process Lasso", Kind = AppKind.Winget, WingetId = "BitSum.ProcessLasso" },
+            // GPU / drivers / monitoring / performance
+            new() { FriendlyName = "NVIDIA App", Category = "Monitoring & Performance", Kind = AppKind.Winget, WingetId = "Nvidia.App" },
+            new() { FriendlyName = "HWiNFO", Category = "Monitoring & Performance", Kind = AppKind.Winget, WingetId = "REALiX.HWiNFO" },
+            new() { FriendlyName = "CPU-Z", Category = "Monitoring & Performance", Kind = AppKind.Winget, WingetId = "CPUID.CPU-Z" },
+            new() { FriendlyName = "Speccy", Category = "Monitoring & Performance", Kind = AppKind.Winget, WingetId = "Piriform.Speccy" },
+            new() { FriendlyName = "CrystalDiskInfo", Category = "Monitoring & Performance", Kind = AppKind.Winget, WingetId = "CrystalDewWorld.CrystalDiskInfo" },
+            new() { FriendlyName = "Process Lasso", Category = "Monitoring & Performance", Kind = AppKind.Winget, WingetId = "BitSum.ProcessLasso" },
+            // Winget ID assumed - verify with `winget search razer cortex` if it fails.
+            new() { FriendlyName = "Razer Cortex", Category = "Monitoring & Performance", Kind = AppKind.Winget, WingetId = "RazerInc.RazerCortex" },
 
             // Streaming / recording / audio
-            new() { FriendlyName = "Streamlabs Desktop", Kind = AppKind.Winget, WingetId = "Streamlabs.StreamlabsOBS" },
-            new() { FriendlyName = "OBS Studio", Kind = AppKind.Winget, WingetId = "OBSProject.OBSStudio" },
-            new() { FriendlyName = "Medal.tv", Kind = AppKind.Winget, WingetId = "Medal.Medal" },
-            new() { FriendlyName = "Voicemeeter Banana", Kind = AppKind.Winget, WingetId = "VB-Audio.Voicemeeter.Banana" },
+            new() { FriendlyName = "Streamlabs Desktop", Category = "Streaming & Recording", Kind = AppKind.Winget, WingetId = "Streamlabs.StreamlabsOBS" },
+            new() { FriendlyName = "Medal.tv", Category = "Streaming & Recording", Kind = AppKind.Winget, WingetId = "Medal.Medal" },
+            new() { FriendlyName = "Voicemeeter Banana", Category = "Streaming & Recording", Kind = AppKind.Winget, WingetId = "VB-Audio.Voicemeeter.Banana" },
 
             // General utility
-            new() { FriendlyName = "VS Code", Kind = AppKind.Winget, WingetId = "Microsoft.VisualStudioCode" },
-            new() { FriendlyName = "PowerShell 7", Kind = AppKind.Winget, WingetId = "Microsoft.PowerShell" },
-            new() { FriendlyName = "Microsoft 365 Apps", Kind = AppKind.Winget, WingetId = "Microsoft.Office" },
-            new() { FriendlyName = "PowerToys", Kind = AppKind.Winget, WingetId = "Microsoft.PowerToys" },
-            new() { FriendlyName = "Python 3", Kind = AppKind.Winget, WingetId = "Python.Python.3" },
-            new() { FriendlyName = "VLC Media Player", Kind = AppKind.Winget, WingetId = "VideoLAN.VLC" },
-            new() { FriendlyName = "7-Zip", Kind = AppKind.Winget, WingetId = "7zip.7zip" },
-            new() { FriendlyName = "Vortex Mod Manager", Kind = AppKind.Winget, WingetId = "NexusMods.Vortex" },
+            new() { FriendlyName = "VS Code", Category = "General Utilities", Kind = AppKind.Winget, WingetId = "Microsoft.VisualStudioCode" },
+            new() { FriendlyName = "PowerShell 7", Category = "General Utilities", Kind = AppKind.Winget, WingetId = "Microsoft.PowerShell" },
+            new() { FriendlyName = "Microsoft 365 Apps", Category = "General Utilities", Kind = AppKind.Winget, WingetId = "Microsoft.Office" },
+            new() { FriendlyName = "PowerToys", Category = "General Utilities", Kind = AppKind.Winget, WingetId = "Microsoft.PowerToys" },
+            new() { FriendlyName = "Python 3", Category = "General Utilities", Kind = AppKind.Winget, WingetId = "Python.Python.3" },
+            new() { FriendlyName = "VLC Media Player", Category = "General Utilities", Kind = AppKind.Winget, WingetId = "VideoLAN.VLC" },
+            new() { FriendlyName = "7-Zip", Category = "General Utilities", Kind = AppKind.Winget, WingetId = "7zip.7zip" },
+            new() { FriendlyName = "Vortex Mod Manager", Category = "General Utilities", Kind = AppKind.Winget, WingetId = "NexusMods.Vortex" },
 
-            // Manual installers - no reliable winget package. Included in the same
-            // pickable list as everything else so the wizard can offer to skip them
-            // (most people don't own this specific hardware).
-            new() { FriendlyName = "Hyte Nexus (HYTE case/AIO control)", Kind = AppKind.Manual,
+            // Redistributables - the one entry everyone should just say yes to. A single
+            // catalog line that silently installs every VC++ runtime version games and
+            // creator apps commonly expect, so people stop hitting "missing MSVCP140.dll"
+            // errors. See InstallBundleAsync for how a Bundle entry actually installs.
+            new() { FriendlyName = "VC++ Redistributables Pack (all versions)", Category = "Redistributables", Kind = AppKind.Bundle,
+                    BundleWingetIds = new[]
+                    {
+                        "Microsoft.VCRedist.2005.x86", "Microsoft.VCRedist.2005.x64",
+                        "Microsoft.VCRedist.2008.x86", "Microsoft.VCRedist.2008.x64",
+                        "Microsoft.VCRedist.2010.x86", "Microsoft.VCRedist.2010.x64",
+                        "Microsoft.VCRedist.2012.x86", "Microsoft.VCRedist.2012.x64",
+                        "Microsoft.VCRedist.2013.x86", "Microsoft.VCRedist.2013.x64",
+                        "Microsoft.VCRedist.2015+.x86", "Microsoft.VCRedist.2015+.x64"
+                    } },
+
+            // RGB / peripheral ecosystems - manufacturer control software for lighting,
+            // fan curves, etc. Nobody owns all of these, so they're skippable like the
+            // manual installers below. OpenRGB is the odd one out: a single open-source
+            // app that talks to hardware from several vendors at once, for anyone who'd
+            // rather avoid running four different vendor apps.
+            // Winget IDs assumed for iCUE/Synapse - verify with `winget search` if either fails.
+            new() { FriendlyName = "Corsair iCUE", Category = "RGB & Peripheral Control", Kind = AppKind.Winget, WingetId = "Corsair.iCUE.4" },
+            new() { FriendlyName = "Razer Synapse", Category = "RGB & Peripheral Control", Kind = AppKind.Winget, WingetId = "Razer.Synapse.3" },
+            new() { FriendlyName = "OpenRGB (universal, multi-vendor)", Category = "RGB & Peripheral Control", Kind = AppKind.Winget, WingetId = "CalcProgrammer1.OpenRGB" },
+            new() { FriendlyName = "Hyte Nexus (HYTE case/AIO control)", Category = "RGB & Peripheral Control", Kind = AppKind.Manual,
                     ManualFileName = "HyteNexusInstaller.exe", ManualUrl = "https://hyte.co/nexus-download" },
-            new() { FriendlyName = "L-Connect 3 (Lian Li fan/lighting control)", Kind = AppKind.Manual,
+            new() { FriendlyName = "L-Connect 3 (Lian Li fan/lighting control)", Category = "RGB & Peripheral Control", Kind = AppKind.Manual,
                     ManualFileName = "LConnect3.zip",
                     ManualUrl = "https://lianli-update-2025.lianli-cn.com/L3_CX/20260422-L-Connect%203-x64-v2.1.20-fde9a570.zip" }
         };
@@ -127,7 +161,7 @@ namespace GamingStackGUI
                 Log("");
 
                 var wingetOk = IsWingetAvailable();
-                if (!wingetOk && selected.Any(a => a.Kind == AppKind.Winget))
+                if (!wingetOk && selected.Any(a => a.Kind is AppKind.Winget or AppKind.Bundle))
                 {
                     Log("WARNING: winget not found - winget-based selections will be skipped.");
                     Fail("winget not found - install 'App Installer' from the Microsoft Store to install winget-based apps.");
@@ -143,6 +177,15 @@ namespace GamingStackGUI
                             continue;
                         }
                         await InstallWingetAppAsync(entry);
+                    }
+                    else if (entry.Kind == AppKind.Bundle)
+                    {
+                        if (!wingetOk)
+                        {
+                            Log($"[{entry.FriendlyName}] skipped - winget unavailable");
+                            continue;
+                        }
+                        await InstallBundleAsync(entry);
                     }
                     else
                     {
@@ -191,12 +234,42 @@ namespace GamingStackGUI
             }
         }
 
-        private async Task InstallWingetAppAsync(AppEntry entry)
+        private Task InstallWingetAppAsync(AppEntry entry) => InstallWingetIdAsync(entry.WingetId!, entry.FriendlyName);
+
+        /// <summary>
+        /// A Bundle entry is just several winget IDs installed back-to-back under one
+        /// friendly catalog line (e.g. every VC++ Redistributable version) - each ID
+        /// still gets its own retry loop, but failures are summarized under the
+        /// bundle's own name so the log doesn't read like a dozen unrelated packages.
+        /// </summary>
+        private async Task InstallBundleAsync(AppEntry entry)
         {
-            var id = entry.WingetId!;
+            var ids = entry.BundleWingetIds ?? Array.Empty<string>();
+            Log($"[{entry.FriendlyName}] installing {ids.Length} package(s) silently...");
+            var failed = 0;
+            foreach (var id in ids)
+            {
+                var ok = await InstallWingetIdAsync(id, $"{entry.FriendlyName} ({id})", quiet: true);
+                if (!ok) failed++;
+            }
+
+            if (failed == 0)
+                Log($"[{entry.FriendlyName}] OK ({ids.Length} package(s))");
+            else
+                Fail($"{entry.FriendlyName}: {failed} of {ids.Length} package(s) failed - some redistributables may already be newer than the requested version, which winget treats as a failure even though nothing's actually wrong");
+        }
+
+        /// <summary>
+        /// Core winget install-by-id loop shared by single apps and bundle members.
+        /// <paramref name="quiet"/> skips the individual Fail() write for bundle
+        /// members (already-newer redist versions "fail" constantly and are noise);
+        /// the bundle as a whole still reports its own summary via InstallBundleAsync.
+        /// </summary>
+        private async Task<bool> InstallWingetIdAsync(string id, string displayName, bool quiet = false)
+        {
             for (int attempt = 1; attempt <= MaxRetries + 1; attempt++)
             {
-                Log($"[{entry.FriendlyName}] installing (attempt {attempt})...");
+                Log($"[{displayName}] installing (attempt {attempt})...");
                 try
                 {
                     var psi = new ProcessStartInfo("winget",
@@ -213,21 +286,23 @@ namespace GamingStackGUI
 
                     if (p.ExitCode == 0)
                     {
-                        Log($"[{entry.FriendlyName}] OK");
-                        return;
+                        Log($"[{displayName}] OK");
+                        return true;
                     }
-                    Log($"[{entry.FriendlyName}] exit code {p.ExitCode}");
+                    Log($"[{displayName}] exit code {p.ExitCode}");
                 }
                 catch (Exception ex)
                 {
-                    Log($"[{entry.FriendlyName}] error: {ex.Message}");
+                    Log($"[{displayName}] error: {ex.Message}");
                 }
 
                 if (attempt <= MaxRetries)
                     await Task.Delay(3000);
             }
 
-            Fail($"winget install failed for {entry.FriendlyName} after {MaxRetries + 1} attempts");
+            if (!quiet)
+                Fail($"winget install failed for {displayName} after {MaxRetries + 1} attempts");
+            return false;
         }
 
         private async Task HandleManualInstallerAsync(AppEntry entry)

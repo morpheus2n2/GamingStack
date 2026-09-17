@@ -75,6 +75,7 @@ namespace GamingStackGUI
 
         private readonly Font _mono = new("Consolas", 14f, FontStyle.Regular);
         private readonly Font _monoSmall = new("Consolas", 12f, FontStyle.Regular);
+        private readonly Font _headingFont = new("Consolas", 12f, FontStyle.Bold | FontStyle.Underline);
         private readonly Font _monoLarge = new("Consolas", 22f, FontStyle.Bold);
 
         // ---- installer + wizard ----
@@ -87,12 +88,36 @@ namespace GamingStackGUI
         private int _perAppIndex;
         private bool?[] _perAppDecisions = Array.Empty<bool?>();
 
+        // ---- terminal window: draggable/resizable ----
+        // Null until PaintTerminal first runs, which seeds these from the original
+        // fixed 0.7/0.62-of-screen defaults; from then on dragging/resizing just
+        // mutates these directly instead of recomputing from Width/Height every frame.
+        private int? _termX, _termY, _termW, _termH;
+        private bool _draggingTerm, _resizingTerm;
+        private Point _dragMouseStart;
+        private Rectangle _dragTermStart;
+        private const int TermResizeGrip = 18;
+        private const int TermMinWidth = 480;
+        private const int TermMinHeight = 280;
+
+        // Sized from the actual title font metrics (+8px padding) rather than a guessed
+        // constant, so the bar is always at least a few px taller than the text it
+        // holds - a hardcoded height was clipping/crowding the title on some displays.
+        private readonly int _titleBarHeight;
+
         public MainForm()
         {
             Text = "GamingStack";
             FormBorderStyle = FormBorderStyle.None;
             BackColor = Color.Black;
             DoubleBuffered = true;
+
+            using (var measureBmp = new Bitmap(1, 1))
+            using (var measureG = Graphics.FromImage(measureBmp))
+            {
+                var textHeight = measureG.MeasureString("Gg", _mono).Height;
+                _titleBarHeight = (int)Math.Ceiling(textHeight) + 8;
+            }
 
             _installer.OnLog += line =>
             {
@@ -233,8 +258,10 @@ namespace GamingStackGUI
                 diskCursor += 300;
             }
 
+            // Not added to the timed reveal - the "Press DEL" prompt is drawn separately
+            // in PaintBios, pinned to the bottom of the screen and visible from frame
+            // one. _footerAt is still used to time the footer beep below.
             _footerAt = diskCursor + 400;
-            Add(_footerAt, "Press DEL to enter BIOS Setup...", Color.Goldenrod);
         }
 
         private static string GetWmiString(string wmiClass, string property)
@@ -539,6 +566,14 @@ namespace GamingStackGUI
                     y += 26;
                 }
             }
+
+            // "Press DEL" prompt: pinned to the bottom of the screen and visible from
+            // the first frame (not part of the timed reveal above) - the whole point is
+            // for it to be impossible to miss.
+            using var delFont = new Font("Consolas", 15f, FontStyle.Bold);
+            const string delPrompt = "Press DEL to enter BIOS Setup... Go on, I dare you!";
+            var delSize = g.MeasureString(delPrompt, delFont);
+            g.DrawString(delPrompt, delFont, Brushes.Goldenrod, (Width - delSize.Width) / 2, Height - delSize.Height - 30);
         }
 
         // ---- Easter egg: press Delete during Bios ----
@@ -577,10 +612,13 @@ namespace GamingStackGUI
 
         private void DrawSky(Graphics g)
         {
+            // Clear daytime blue rather than a dusky purple - reads more like an actual
+            // sky (and matches the desktop wallpaper's palette) for the clouds to move
+            // across.
             using var sky = new LinearGradientBrush(
                 new Rectangle(0, 0, Width, Height),
-                Color.FromArgb(20, 10, 40),
-                Color.FromArgb(70, 15, 90),
+                Color.FromArgb(70, 130, 220),
+                Color.FromArgb(190, 225, 250),
                 LinearGradientMode.Vertical);
             g.FillRectangle(sky, 0, 0, Width, Height);
         }
@@ -590,6 +628,12 @@ namespace GamingStackGUI
             DrawCloud(g, 90, 60, 18 * CloudSpeedMultiplier, t);
             DrawCloud(g, 220, 40, 26 * CloudSpeedMultiplier, t);
             DrawCloud(g, 400, 90, 34 * CloudSpeedMultiplier, t);
+
+            // A few extra, quicker clouds - phase-shifted (t + offset) so they don't
+            // all line up identically with the three above, for a busier sky.
+            DrawCloud(g, 140, 30, 44 * CloudSpeedMultiplier, t + 0.6);
+            DrawCloud(g, 300, 22, 50 * CloudSpeedMultiplier, t + 1.3);
+            DrawCloud(g, 60, 45, 40 * CloudSpeedMultiplier, t + 2.1);
         }
 
         private void DrawCloud(Graphics g, int baseY, int size, double speedPxPerSec, double t)
@@ -629,7 +673,7 @@ namespace GamingStackGUI
             for (int i = 0; i < stripCount; i++)
             {
                 float localX = i * stripW;
-                float wave = (float)(Math.Sin((localX * 0.06) + t * 3.0) * 18.0);
+                float wave = (float)(Math.Sin((localX * 0.06) + t * 2.1) * 18.0);
                 float attachFactor = Math.Min(1f, localX / 40f);
                 wave *= attachFactor;
 
@@ -661,12 +705,42 @@ namespace GamingStackGUI
             var titleSize = g.MeasureString(title, _monoLarge);
             g.DrawString(title, _monoLarge, Brushes.White, (Width - titleSize.Width) / 2, Height - 160);
 
+            // Full-width, segmented block style (like the real Win9x boot progress bar)
+            // instead of a flat continuous fill in one static color - a run of discrete
+            // blocks, cycling through a gradient, reads much less "stuck" than one solid
+            // color creeping across the screen.
             var pct = Math.Min(1.0, elapsed / (double)BootHoldMs);
-            const int barWidth = 500;
-            var barX = (Width - barWidth) / 2;
+            const int barMargin = 60;
+            const int barHeight = 26;
+            const int blockCount = 44;
+            const int blockGap = 3;
+
+            var barWidth = Width - barMargin * 2;
+            var barX = barMargin;
             var barY = Height - 110;
-            g.DrawRectangle(Pens.Gainsboro, barX, barY, barWidth, 24);
-            g.FillRectangle(Brushes.Magenta, barX + 2, barY + 2, (int)((barWidth - 4) * pct), 20);
+
+            g.DrawRectangle(Pens.Gainsboro, barX, barY, barWidth, barHeight);
+
+            var innerWidth = barWidth - 4;
+            var blockWidth = (innerWidth - blockGap * (blockCount - 1)) / (float)blockCount;
+            var filledBlocks = (int)(pct * blockCount);
+
+            for (int i = 0; i < filledBlocks; i++)
+            {
+                var hueT = i / (float)(blockCount - 1);
+                using var blockBrush = new SolidBrush(LerpColor(Color.FromArgb(0, 210, 230), Color.FromArgb(255, 0, 170), hueT));
+                var bx = barX + 2 + i * (blockWidth + blockGap);
+                g.FillRectangle(blockBrush, bx, barY + 2, blockWidth, barHeight - 4);
+            }
+        }
+
+        private static Color LerpColor(Color a, Color b, float t)
+        {
+            t = Math.Clamp(t, 0f, 1f);
+            return Color.FromArgb(
+                (int)(a.R + (b.R - a.R) * t),
+                (int)(a.G + (b.G - a.G) * t),
+                (int)(a.B + (b.B - a.B) * t));
         }
 
         // ---- Desktop / shared wallpaper ----
@@ -749,21 +823,44 @@ namespace GamingStackGUI
             g.FillEllipse(ledBrush, x + 6, y + 22, 8, 8);
         }
 
+        private readonly Font _clockFont = new("Consolas", 10f, FontStyle.Regular);
+
         private void DrawTaskbar(Graphics g)
         {
-            const int barHeight = 36;
+            const int barHeight = 44;
             using var barBrush = new SolidBrush(Color.FromArgb(192, 192, 192));
             g.FillRectangle(barBrush, 0, Height - barHeight, Width, barHeight);
 
+            // Start button: sized around the actual text width instead of a fixed 80px,
+            // and the text is centered both ways within it - a fixed-width button with
+            // left-anchored text meant "Start" was never actually centered in it.
             using var btnBrush = new SolidBrush(Color.FromArgb(220, 220, 220));
-            var startRect = new Rectangle(6, Height - barHeight + 4, 80, barHeight - 8);
+            var startText = "Start";
+            var startTextSize = g.MeasureString(startText, _mono);
+            var startWidth = (int)startTextSize.Width + 36;
+            var startRect = new Rectangle(6, Height - barHeight + 5, startWidth, barHeight - 10);
             g.FillRectangle(btnBrush, startRect);
             g.DrawRectangle(Pens.Gray, startRect);
-            g.DrawString("Start", _mono, Brushes.Black, startRect.X + 14, startRect.Y + 4);
+            g.DrawString(startText, _mono, Brushes.Black,
+                startRect.X + (startRect.Width - startTextSize.Width) / 2,
+                startRect.Y + (startRect.Height - startTextSize.Height) / 2);
 
-            var clock = DateTime.Now.ToString("HH:mm");
-            var clockSize = g.MeasureString(clock, _mono);
-            g.DrawString(clock, _mono, Brushes.Black, Width - clockSize.Width - 20, Height - barHeight + 8);
+            // Clock: time on top, date underneath. Anchored from the right edge (not
+            // computed via a left position + width) and using a fixed, small per-line
+            // height rather than MeasureString's height (which pads more than a 10pt
+            // font actually needs) - together these were letting the date creep past
+            // both the right edge and the bottom of the screen on some setups.
+            const int clockLineHeight = 14;
+            const int clockRightMargin = 20;
+            var timeStr = DateTime.Now.ToString("HH:mm");
+            var dateStr = DateTime.Now.ToString("dd/MM/yyyy");
+            var timeSize = g.MeasureString(timeStr, _clockFont);
+            var dateSize = g.MeasureString(dateStr, _clockFont);
+            var clockRight = Width - clockRightMargin;
+            var clockBlockHeight = clockLineHeight * 2;
+            var clockTop = Height - barHeight + (barHeight - clockBlockHeight) / 2;
+            g.DrawString(timeStr, _clockFont, Brushes.Black, clockRight - timeSize.Width, clockTop);
+            g.DrawString(dateStr, _clockFont, Brushes.Black, clockRight - dateSize.Width, clockTop + clockLineHeight);
         }
 
         // ---- Terminal (opens on top of the desktop, runs the interactive wizard then the installer) ----
@@ -778,10 +875,17 @@ namespace GamingStackGUI
             var openProgress = Math.Clamp(elapsed / (double)TerminalOpenMs, 0.0, 1.0);
             var eased = 1 - Math.Pow(1 - openProgress, 3);
 
-            var fullW = (int)(Width * 0.7);
-            var fullH = (int)(Height * 0.62);
-            var fullX = (Width - fullW) / 2;
-            var fullY = (Height - fullH) / 2;
+            if (_termW == null)
+            {
+                _termW = (int)(Width * 0.7);
+                _termH = (int)(Height * 0.62);
+                _termX = (Width - _termW.Value) / 2;
+                _termY = (Height - _termH.Value) / 2;
+            }
+            var fullW = _termW!.Value;
+            var fullH = _termH!.Value;
+            var fullX = _termX!.Value;
+            var fullY = _termY!.Value;
 
             var w = (int)(fullW * eased);
             var h = (int)(fullH * eased);
@@ -794,10 +898,22 @@ namespace GamingStackGUI
 
             if (eased < 0.98) return;
 
-            const int titleHeight = 26;
+            var titleHeight = _titleBarHeight;
             using var titleBrush = new SolidBrush(Color.FromArgb(30, 30, 30));
             g.FillRectangle(titleBrush, fullX, fullY, fullW, titleHeight);
-            g.DrawString("GamingStack Installer", _mono, Brushes.Gainsboro, fullX + 8, fullY + 4);
+            var titleTextSize = g.MeasureString("GamingStack Installer", _mono);
+            g.DrawString("GamingStack Installer", _mono, Brushes.Gainsboro,
+                fullX + 16, fullY + (titleHeight - titleTextSize.Height) / 2);
+
+            // Resize grip, bottom-right corner (drag it to resize); drag the title bar
+            // to move the window. Both handled in OnMouseDown/Move/Up below.
+            using (var gripPen = new Pen(Color.Gray, 2))
+            {
+                var gripX = fullX + fullW - TermResizeGrip;
+                var gripY = fullY + fullH - TermResizeGrip;
+                for (int i = 6; i <= TermResizeGrip; i += 6)
+                    g.DrawLine(gripPen, gripX + TermResizeGrip - i, gripY + TermResizeGrip, gripX + TermResizeGrip, gripY + TermResizeGrip - i);
+            }
 
             switch (_wizardPhase)
             {
@@ -816,45 +932,178 @@ namespace GamingStackGUI
             }
         }
 
+        // Cached across frames since the catalog never changes at runtime - no point
+        // re-grouping and re-bin-packing 30-odd entries on every 33ms paint tick.
+        private List<(string Category, List<int> Indices)>? _wizardColumn0;
+        private List<(string Category, List<int> Indices)>? _wizardColumn1;
+
+        private void BuildWizardColumnsIfNeeded()
+        {
+            if (_wizardColumn0 != null) return;
+
+            var catalog = InstallerEngine.Catalog;
+
+            // Group by category, preserving the order categories first appear in the
+            // catalog (not a sort - so the wizard's on-screen order matches source order).
+            var groups = new List<(string Category, List<int> Indices)>();
+            for (int i = 0; i < catalog.Count; i++)
+            {
+                var cat = catalog[i].Category;
+                var group = groups.FirstOrDefault(g => g.Category == cat);
+                if (group.Indices == null)
+                {
+                    group = (cat, new List<int>());
+                    groups.Add(group);
+                }
+                group.Indices.Add(i);
+            }
+
+            // Greedily bin-pack whole categories (never split one across columns) into
+            // two columns, always dropping the next category into whichever column is
+            // currently shorter - keeps the two columns roughly the same height even
+            // though categories vary in size.
+            var col0 = new List<(string, List<int>)>();
+            var col1 = new List<(string, List<int>)>();
+            var height0 = 0;
+            var height1 = 0;
+            foreach (var group in groups)
+            {
+                var blockHeight = 3 + group.Indices.Count; // heading + spacer + items + trailing spacer
+                if (height0 <= height1)
+                {
+                    col0.Add(group);
+                    height0 += blockHeight;
+                }
+                else
+                {
+                    col1.Add(group);
+                    height1 += blockHeight;
+                }
+            }
+
+            _wizardColumn0 = col0;
+            _wizardColumn1 = col1;
+        }
+
+        // How fast the wizard's app list "types" itself out, in characters/second.
+        private const int WizardTypeCharsPerSecond = 420;
+
+        private readonly struct WizardLine
+        {
+            public readonly string Text;
+            public readonly Font Font;
+            public readonly Brush Brush;
+            public WizardLine(string text, Font font, Brush brush) { Text = text; Font = font; Brush = brush; }
+        }
+
         private void DrawWizard(Graphics g, int fullX, int fullY, int fullW, int fullH, int titleHeight)
         {
             var catalog = InstallerEngine.Catalog;
             var contentX = fullX + 16;
-            var contentTop = fullY + titleHeight + 10;
             const int lineHeight = 18;
 
-            g.DrawString("GamingStack will install the following:", _mono, Brushes.Gainsboro, contentX, contentTop);
-            var listTop = contentTop + lineHeight + 8;
+            // Dropped one extra line below the title bar so the heading doesn't sit
+            // flush under it.
+            var headingTop = fullY + titleHeight + 10 + lineHeight;
+            g.DrawString("GamingStack will install the following:", _mono, Brushes.Gainsboro, contentX, headingTop);
+            var listTop = headingTop + lineHeight + 8;
 
-            var half = (int)Math.Ceiling(catalog.Count / 2.0);
             var colWidth = (fullW - 32) / 2;
 
-            for (int i = 0; i < catalog.Count; i++)
+            BuildWizardColumnsIfNeeded();
+            var columnGroups = new[] { _wizardColumn0!, _wizardColumn1! };
+
+            // Per-frame line content (text/font/brush per row, per column) - unlike the
+            // category grouping above (cached; the catalog never changes) this has to be
+            // rebuilt every frame since the wizard's own selection state does. A `null`
+            // entry is a blank spacer row (used after each category heading, so the
+            // heading doesn't visually blend into the list under it).
+            var colLines = new List<WizardLine?>[2];
+            for (int col = 0; col < 2; col++)
             {
-                var col = i < half ? 0 : 1;
-                var row = i < half ? i : i - half;
-                var lx = contentX + col * colWidth;
-                var ly = listTop + row * lineHeight;
-
-                var marker = "   ";
-                var brush = Brushes.Gainsboro;
-
-                if (i < _perAppDecisions.Length && _perAppDecisions[i].HasValue)
+                var lines = new List<WizardLine?>();
+                foreach (var (category, indices) in columnGroups[col])
                 {
-                    var got = _perAppDecisions[i]!.Value;
-                    marker = got ? "[x]" : "[ ]";
-                    brush = got ? Brushes.LightGreen : Brushes.Gray;
-                }
-                else if (_wizardPhase == WizardPhase.PerApp && i == _perAppIndex)
-                {
-                    marker = "-->";
-                    brush = Brushes.Gold;
-                }
+                    lines.Add(new WizardLine($"-- {category} --", _headingFont, Brushes.DeepSkyBlue));
+                    lines.Add(null);
 
-                g.DrawString($"{marker} {catalog[i].FriendlyName}", _monoSmall, brush, lx, ly);
+                    foreach (var i in indices)
+                    {
+                        var marker = "   ";
+                        var brush = Brushes.Gainsboro;
+
+                        if (i < _perAppDecisions.Length && _perAppDecisions[i].HasValue)
+                        {
+                            var got = _perAppDecisions[i]!.Value;
+                            marker = got ? "[x]" : "[ ]";
+                            brush = got ? Brushes.LightGreen : Brushes.Gray;
+                        }
+                        else if (_wizardPhase == WizardPhase.PerApp && i == _perAppIndex)
+                        {
+                            marker = "-->";
+                            brush = Brushes.Gold;
+                        }
+
+                        lines.Add(new WizardLine($"{marker} {catalog[i].FriendlyName}", _monoSmall, brush));
+                    }
+
+                    // Trailing blank line too, so a category's list doesn't run straight
+                    // into the next category's heading - matches the spacer already
+                    // added right after the heading above.
+                    lines.Add(null);
+                }
+                colLines[col] = lines;
             }
 
-            var promptTop = listTop + half * lineHeight + 16;
+            var maxRowsUsed = Math.Max(colLines[0].Count, colLines[1].Count);
+            var totalChars = colLines[0].Concat(colLines[1]).Where(l => l != null).Sum(l => l!.Value.Text.Length);
+
+            // Typewriter reveal: starts once the terminal window has finished opening,
+            // and (since _stageWatch never resets while still in the Terminal stage)
+            // naturally stays fully revealed forever afterwards, including across
+            // WizardPhase changes - it only ever plays once.
+            var typingElapsedMs = Math.Max(0, _stageWatch.ElapsedMilliseconds - TerminalOpenMs);
+            var typedBudget = (int)(typingElapsedMs / 1000.0 * WizardTypeCharsPerSecond);
+            var fullyTyped = typedBudget >= totalChars;
+            var remaining = typedBudget;
+
+            (float X, float Y, string Shown, Font Font)? cursor = null;
+
+            for (int row = 0; row < maxRowsUsed; row++)
+            {
+                for (int col = 0; col < 2; col++)
+                {
+                    if (row >= colLines[col].Count) continue;
+                    var line = colLines[col][row];
+                    if (line == null) continue;
+
+                    var text = line.Value.Text;
+                    string shown;
+                    if (remaining <= 0) shown = "";
+                    else if (remaining >= text.Length) { shown = text; remaining -= text.Length; }
+                    else { shown = text[..remaining]; remaining = 0; }
+
+                    if (shown.Length == 0) continue;
+
+                    var lx = contentX + col * colWidth;
+                    var ly = listTop + row * lineHeight;
+                    g.DrawString(shown, line.Value.Font, line.Value.Brush, lx, ly);
+
+                    if (shown.Length < text.Length)
+                        cursor = (lx, ly, shown, line.Value.Font);
+                }
+            }
+
+            // Blinking cursor at wherever typing currently stands, mid-reveal.
+            if (cursor != null && (typingElapsedMs / 500) % 2 == 0)
+            {
+                var cx = cursor.Value.X + g.MeasureString(cursor.Value.Shown, cursor.Value.Font).Width;
+                g.FillRectangle(Brushes.Gainsboro, cx, cursor.Value.Y, 8, 14);
+            }
+
+            if (!fullyTyped) return;
+
+            var promptTop = listTop + maxRowsUsed * lineHeight + 16;
             string prompt = _wizardPhase switch
             {
                 WizardPhase.ConfirmAll => "Install everything shown above?   [Y] Yes    [N] No",
@@ -1054,6 +1303,66 @@ namespace GamingStackGUI
             if (_stage == Stage.Terminal) HandleWizardKey(e.KeyCode);
 
             if (e.KeyCode == Keys.Escape) Close();
+        }
+
+        // ---- terminal window drag/resize ----
+        // The "window" is just a rectangle we draw, not a real child window, so moving
+        // and resizing it is hand-rolled: hit-test the title bar / grip corner on mouse
+        // down, then just mutate _termX/Y/W/H on move. Only active during the Terminal
+        // stage, and only once the open animation has actually finished positioning it
+        // (_termX etc. are seeded the first time PaintTerminal runs).
+
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            base.OnMouseDown(e);
+            if (_stage != Stage.Terminal || _termX == null) return;
+
+            var fullX = _termX!.Value;
+            var fullY = _termY!.Value;
+            var fullW = _termW!.Value;
+            var fullH = _termH!.Value;
+
+            var gripRect = new Rectangle(fullX + fullW - TermResizeGrip, fullY + fullH - TermResizeGrip, TermResizeGrip, TermResizeGrip);
+            var titleRect = new Rectangle(fullX, fullY, fullW, _titleBarHeight);
+
+            if (gripRect.Contains(e.Location))
+            {
+                _resizingTerm = true;
+                _dragMouseStart = e.Location;
+                _dragTermStart = new Rectangle(fullX, fullY, fullW, fullH);
+            }
+            else if (titleRect.Contains(e.Location))
+            {
+                _draggingTerm = true;
+                _dragMouseStart = e.Location;
+                _dragTermStart = new Rectangle(fullX, fullY, fullW, fullH);
+            }
+        }
+
+        protected override void OnMouseMove(MouseEventArgs e)
+        {
+            base.OnMouseMove(e);
+            if (_draggingTerm)
+            {
+                var dx = e.X - _dragMouseStart.X;
+                var dy = e.Y - _dragMouseStart.Y;
+                _termX = Math.Clamp(_dragTermStart.X + dx, 0, Math.Max(0, Width - _termW!.Value));
+                _termY = Math.Clamp(_dragTermStart.Y + dy, 0, Math.Max(0, Height - _termH!.Value));
+            }
+            else if (_resizingTerm)
+            {
+                var dx = e.X - _dragMouseStart.X;
+                var dy = e.Y - _dragMouseStart.Y;
+                _termW = Math.Max(TermMinWidth, Math.Min(Width - _termX!.Value, _dragTermStart.Width + dx));
+                _termH = Math.Max(TermMinHeight, Math.Min(Height - _termY!.Value, _dragTermStart.Height + dy));
+            }
+        }
+
+        protected override void OnMouseUp(MouseEventArgs e)
+        {
+            base.OnMouseUp(e);
+            _draggingTerm = false;
+            _resizingTerm = false;
         }
 
         protected override void OnFormClosed(FormClosedEventArgs e)

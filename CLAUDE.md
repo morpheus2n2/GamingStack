@@ -7,6 +7,20 @@ Win95/98-styled boot sequence, then it installs a full gaming app stack and
 applies gaming-related tweaks. The whole point is minimal manual steps plus
 maximum nostalgia.
 
+## Versioning
+
+The project uses [Semantic Versioning](https://semver.org/), tracked in
+`GamingStackGUI.csproj` (`<Version>`/`<AssemblyVersion>`/`<FileVersion>`)
+and mirrored as a `## [x.y.z] - ...` heading at the top of `CHANGELOG.md`.
+While still under `0.y.z` (nothing's been publicly released):
+- **Bump the minor version** (`0.6.x` → `0.7.0`) for a change that adds a
+  feature - a new wizard behavior, a new catalog category, a new stage.
+- **Bump the patch version** (`0.6.1` → `0.6.2`) for a fix, tweak, or pure
+  visual polish with no new feature - the boot sky recolor, a warning fix,
+  a spacing adjustment.
+- Bump both the csproj and the changelog together, in the same change -
+  don't let the version number drift from what's actually in the code.
+
 ## History (read this before "helpfully" restructuring anything)
 
 This started as a C# WinForms launcher that shelled out to a separate
@@ -44,13 +58,26 @@ publish. Everything lives in one process:
   rather than a hardcoded resource path, specifically to avoid the exact
   "embedded resource path mismatch" bug that broke the first version.
 - `InstallerEngine.cs` - the actual install stack (winget loop, manual
-  installer fallback, tweaks), decoupled from the UI via an `OnLog`
-  event so it doesn't know anything about WinForms. Exposes a static
-  `Catalog` of `AppEntry` (friendly name + winget ID or manual URL,
-  discriminated by `AppKind`) - this is the single source of truth for
-  what's installable; `RunAsync` takes the selected subset as a
-  parameter rather than deciding for itself, since the wizard in
-  `MainForm.cs` owns that decision.
+  installer fallback, bundle installs, tweaks), decoupled from the UI via
+  an `OnLog` event so it doesn't know anything about WinForms. Exposes a
+  static `Catalog` of `AppEntry` (friendly name + `Category` + winget ID /
+  manual URL / bundle of winget IDs, discriminated by `AppKind`) - this is
+  the single source of truth for what's installable; `RunAsync` takes the
+  selected subset as a parameter rather than deciding for itself, since
+  the wizard in `MainForm.cs` owns that decision.
+  - `AppKind.Winget` / `AppKind.Manual` are unchanged from before.
+  - `AppKind.Bundle` is a catalog entry backed by several winget IDs
+    (`BundleWingetIds`) installed back-to-back under one friendly line -
+    used for "VC++ Redistributables Pack (all versions)" so the wizard
+    doesn't have to show a dozen near-identical VCRedist entries. Each ID
+    still gets its own retry loop; per-ID failures are summarized under
+    the bundle's name rather than each raising its own `Fail()` (an
+    already-newer redist "failing" to install is normal noise, not a real
+    problem).
+  - `Category` is display-only - it doesn't affect install order or
+    logic, only how `DrawWizard` in `MainForm.cs` groups the on-screen
+    list under a heading. Add a new category by just giving an `AppEntry`
+    a category string that doesn't exist yet.
 
 ## Stage flow (`MainForm.cs`)
 
@@ -83,7 +110,9 @@ Bios -> Boot -> Desktop -> Terminal
   (`WizardPhase` enum in `MainForm.cs`) before ever touching
   `InstallerEngine`:
   - `ConfirmAll` shows the full `InstallerEngine.Catalog` (friendly
-    names) and asks Y/N to install everything.
+    names, grouped under a heading per `Category` - see
+    `BuildWizardColumnsIfNeeded`/`DrawWizard`) and asks Y/N to install
+    everything.
   - `N` -> `ChooseIndividually` asks whether to pick items one at a time;
     `Y` -> `PerApp` walks the catalog asking Y/N per entry, building
     `_selectedApps` and showing a live checklist (`_perAppDecisions`).
@@ -122,6 +151,12 @@ into the terminal window. Still open:
 - MSI Afterburner has no reliable winget package and no verified stable
   direct-download URL was available when the manual-installer list was
   built - add it there if/when a good source is confirmed
+- Three winget IDs in the catalog are best-guess, not verified on a real
+  machine: `RazerInc.RazerCortex` (Razer Cortex), `Corsair.iCUE.4`
+  (Corsair iCUE) and `Razer.Synapse.3` (Razer Synapse). These vendors
+  change package IDs more than most - if one of these three keeps
+  reporting a failed install in the terminal log, run
+  `winget search <name>` and correct the ID in `InstallerEngine.cs`.
 
 ## Dev workflow note - two manifests
 

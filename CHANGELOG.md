@@ -1,10 +1,121 @@
 # Changelog
 
-Nothing's been tagged as a release yet, so this is grouped by development
-milestone rather than version numbers for now — worth switching to proper
-[semantic versioning](https://semver.org/) once you start cutting releases.
+Versioned using [Semantic Versioning](https://semver.org/) (`MAJOR.MINOR.PATCH`).
+While the project sits at `0.y.z` (nothing's been publicly released yet),
+minor bumps mean a new feature, patch bumps mean a fix/tweak with no new
+feature - see "Versioning" in `CLAUDE.md` for the exact rule. The version
+lives in `GamingStackGUI.csproj` (`<Version>`) and should be bumped in the
+same change that updates this file.
 
-## Current build — interactive install wizard + taskbar fix
+Everything below `0.6.2` predates versioning entirely, so those entries are
+backfilled from the original milestone-based changelog and given version
+numbers retroactively - there's no real date for them, only relative order.
+
+## [0.6.2] - Nullable warning fix
+
+### Fixed
+- `CS8629` compiler warning (nullable value type may be null) on
+  `_termH.Value` in `PaintTerminal` - the null-forgiving operator (`!`)
+  was already used for the neighboring `_termX`/`_termY` reads on the
+  lines right below it, just missed on this one
+
+## [0.6.1] - Boot sky/flag/progress bar, taskbar clock fix, list spacing
+
+### Changed
+- **Boot sky** recolored from a dusky purple gradient to a clear daytime
+  blue - reads more like an actual sky (and matches the desktop
+  wallpaper's palette) for the clouds to move across
+- **Flag wave** slowed down slightly (less frantic than before)
+- **Boot progress bar** now spans the full width of the screen (like the
+  real Win9x boot bar) and is drawn as discrete gradient blocks
+  (cyan → magenta) instead of one flat, static-colored fill
+- **Taskbar Start button** padding increased again for a bit more
+  breathing room around the text
+- **Taskbar clock** rewritten to anchor from the right edge and use a
+  fixed per-line height instead of `MeasureString`'s (padded) height -
+  the date was creeping past the right and bottom edges of the screen on
+  some setups
+- **Wizard list**: a category's items now get a blank line *before* the
+  next category's heading too, not just after their own heading - so a
+  category block is fully boxed in whitespace on both sides
+
+## [0.6.0] - BIOS/boot/taskbar polish + movable terminal + typewriter list
+
+### Added
+- **Terminal window is now draggable and resizable**: drag the title bar to
+  move it, drag the bottom-right corner grip to resize it (down to a
+  480x280 minimum). Position/size persist for the rest of the run once
+  set (`_termX/_termY/_termW/_termH` in `MainForm.cs`), instead of being
+  recomputed from screen size every frame
+- **Typewriter reveal** for the wizard's app list: it now "types" itself
+  onto the screen (420 chars/sec, with a blinking cursor at the current
+  typing position) the first time the terminal opens, then stays fully
+  shown for the rest of the run - the Y/N prompt itself doesn't appear
+  until the list has finished typing
+- Date added under the clock on the taskbar (`dd/MM/yyyy`, stacked under
+  the time like the real Windows taskbar clock)
+
+### Changed
+- **BIOS "Press DEL" prompt** moved out of the timed line-by-line reveal:
+  it's now pinned to the bottom of the screen and visible from the very
+  first frame instead of waiting for the rest of the POST text, and now
+  reads "Press DEL to enter BIOS Setup... Go on, I dare you!"
+- **Boot animation**: three extra, quicker clouds added (phase-shifted so
+  they don't overlap the original three identically) for a busier sky
+- **Taskbar Start button** now sizes itself around the actual text width
+  and centers "Start" both ways, instead of a fixed 80px button with
+  left-anchored text that was never actually centered in it
+- **Terminal title bar height** is now measured from the title font's
+  actual metrics (+8px padding) instead of a hardcoded 26px, so the
+  header text can't end up taller than the bar holding it
+- **Wizard list spacing**: the "GamingStack will install the following:"
+  heading now sits one line lower under the title bar, and every category
+  heading now has a blank line before its items instead of running
+  straight into them
+
+## [0.5.0] - Categorized catalog + VC++ redist bundle
+
+### Added
+- **Catalog entries now carry a `Category`**, and the wizard's app list
+  renders a heading per category instead of one flat two-column list.
+  Categories are bin-packed as whole blocks across the two columns
+  (never split a category's items across columns) so both columns stay
+  roughly the same height regardless of category size
+  (`BuildWizardColumnsIfNeeded`/`DrawWizard` in `MainForm.cs`)
+- **`AppKind.Bundle`**: a catalog entry backed by several winget IDs
+  installed back-to-back under one friendly name. Used for the new
+  "VC++ Redistributables Pack (all versions)" entry — installs every
+  VC++ runtime from 2005 through 2015+ (x86 and x64) silently, since so
+  much of the gaming/streaming stack quietly expects one of these to
+  already be present. Per-ID failures (common when a newer version is
+  already installed) are summarized under the bundle's name rather than
+  each raising its own warning
+- **Razer Cortex** added to Monitoring & Performance
+- **RGB & Peripheral Control** category: Corsair iCUE and Razer Synapse
+  (winget), plus OpenRGB — a single open-source app that talks to
+  several vendors' RGB hardware at once — alongside the existing Hyte
+  Nexus / L-Connect 3 manual installers
+
+### Changed
+- Removed OBS Studio from the catalog — Streamlabs Desktop (which is
+  itself OBS-based) already covers that need, and having both listed
+  separately was redundant
+
+### Fixed
+- Terminal window title ("GamingStack Installer") was drawn 8px further
+  left than every line of content below it (the app list, prompts, and
+  installer log all use a 16px left margin; the title used 8px) — the
+  two-column app list itself was already pixel-aligned row-for-row, this
+  was the actual source of the "doesn't quite line up" look. Title now
+  uses the same 16px margin as the rest of the window content.
+
+### Known caveats
+- Three winget IDs are best-guess and not yet verified on real hardware:
+  `RazerInc.RazerCortex`, `Corsair.iCUE.4`, `Razer.Synapse.3`. If any of
+  these consistently fail in the install log, the fix is a `winget
+  search` and a one-line ID correction in `InstallerEngine.cs`.
+
+## [0.4.0] - Interactive install wizard + taskbar fix
 
 ### Added
 - **Interactive install wizard** in the terminal stage, replacing the old
@@ -40,7 +151,7 @@ milestone rather than version numbers for now — worth switching to proper
   taskbar is an always-on-top window that can otherwise render above our
   own drawn one even when our bounds are correct
 
-## Previous build — C# GUI rewrite (all-in-one)
+## [0.3.0] - C# GUI rewrite (all-in-one)
 
 Everything now lives in a single WinForms process. No PowerShell, no
 external asset files.
@@ -104,7 +215,7 @@ external asset files.
 - Real boot animation/wallpaper assets beyond the current placeholders
 - Installation log viewer / summary screen
 
-## Previous iteration — self-contained PowerShell script
+## [0.2.0] - Self-contained PowerShell script
 
 Single `.ps1` file with the win95 startup sound embedded as base64 and the
 app list embedded directly in the script, so there were no companion files
@@ -120,7 +231,7 @@ to a full GUI.
 - Gaming registry tweaks (Game Mode, HAGS, High Performance power plan)
 - Logging to file, opened automatically at the end
 
-## Original iteration — WinForms launcher + separate PowerShell script (deprecated)
+## [0.1.0] - WinForms launcher + separate PowerShell script (abandoned)
 
 The first attempt: a compiled C# launcher that extracted assets and handed
 off to a separate `.ps1` installer script. **Abandoned** — worked in the

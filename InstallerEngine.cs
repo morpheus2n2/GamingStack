@@ -90,6 +90,12 @@ namespace GamingStackGUI
             new() { FriendlyName = "Speccy", Category = "Monitoring & Performance", Kind = AppKind.Winget, WingetId = "Piriform.Speccy" },
             new() { FriendlyName = "CrystalDiskInfo", Category = "Monitoring & Performance", Kind = AppKind.Winget, WingetId = "CrystalDewWorld.CrystalDiskInfo" },
             new() { FriendlyName = "Process Lasso", Category = "Monitoring & Performance", Kind = AppKind.Winget, WingetId = "BitSum.ProcessLasso" },
+            // Microsoft's own first-party monitoring/cleanup app. Confirmed on winget
+            // as Microsoft.PCManager (still labelled Beta upstream as of writing, but
+            // the package itself installs cleanly) - CPU/RAM/GPU monitoring, storage
+            // cleanup and startup-app management overlap with the utilities above, but
+            // it's opt-in and skippable like everything else in this list.
+            new() { FriendlyName = "Microsoft PC Manager", Category = "Monitoring & Performance", Kind = AppKind.Winget, WingetId = "Microsoft.PCManager" },
             // No winget package exists for Cortex - Razer only distributes it as a
             // direct download, so it's a Manual entry like Hyte Nexus/L-Connect 3
             // below rather than a (nonexistent) winget ID. Uses Razer's own stable
@@ -196,6 +202,84 @@ namespace GamingStackGUI
         private string? _logFilePath;
         public string? LogFilePath => _logFilePath;
 
+        // ---- gaming tweaks: disclosed before they happen, reversible after ----
+        // Set once ApplyTweaks() actually runs (i.e. the user said yes at the
+        // wizard's "Apply these tweaks?" prompt) - the summary screen reads these
+        // rather than assuming tweaks always ran, which is exactly the bug this
+        // whole section exists to fix (see ROADMAP.md's disclosed/reversible rule).
+        public bool TweaksApplied { get; private set; }
+        public string? TweaksRevertFilePath { get; private set; }
+
+        /// <summary>
+        /// One tweak GamingStack can apply, with its real current value and what it
+        /// would change to - built for the wizard's consent screen so nothing is a
+        /// surprise. Read-only: calling this never changes anything on the machine.
+        /// </summary>
+        public readonly record struct TweakPreview(string Name, string Current, string NewValue);
+
+        public static List<TweakPreview> PreviewTweaks()
+        {
+            var list = new List<TweakPreview>();
+
+            string gameMode;
+            try
+            {
+                using var key = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\GameBar");
+                var val = key?.GetValue("AllowAutoGameMode");
+                gameMode = val == null ? "not set (Windows default)" : (Convert.ToInt32(val) == 1 ? "enabled" : "disabled");
+            }
+            catch { gameMode = "unknown"; }
+            list.Add(new TweakPreview("Game Mode", gameMode, "enabled"));
+
+            string hags;
+            try
+            {
+                using var key = Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Control\GraphicsDrivers");
+                var val = key?.GetValue("HwSchMode");
+                hags = val == null ? "not set (Windows default: off)" : (Convert.ToInt32(val) == 2 ? "on" : "off");
+            }
+            catch { hags = "unknown"; }
+            list.Add(new TweakPreview("Hardware-accelerated GPU scheduling", hags, "on"));
+
+            var (_, planName) = GetActivePowerScheme();
+            list.Add(new TweakPreview("Power plan", planName ?? "unknown", "High performance"));
+
+            return list;
+        }
+
+        /// <summary>
+        /// Reads the currently active power plan via `powercfg /getactivescheme`,
+        /// e.g. "Power Scheme GUID: 381b4222-...  (Balanced)". Needed both for the
+        /// consent-screen preview (friendly name) and the revert script (the real
+        /// GUID, since "Balanced" alone isn't something powercfg can switch back to
+        /// if the user has a custom plan with a name that happens to collide).
+        /// </summary>
+        private static (string? Guid, string? Name) GetActivePowerScheme()
+        {
+            try
+            {
+                var psi = new ProcessStartInfo("powercfg", "/getactivescheme")
+                {
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    CreateNoWindow = true
+                };
+                using var p = Process.Start(psi);
+                if (p == null) return (null, null);
+                var output = p.StandardOutput.ReadToEnd();
+                p.WaitForExit(3000);
+
+                var guidMatch = System.Text.RegularExpressions.Regex.Match(output,
+                    @"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}");
+                var nameMatch = System.Text.RegularExpressions.Regex.Match(output, @"\(([^)]+)\)");
+                return (guidMatch.Success ? guidMatch.Value : null, nameMatch.Success ? nameMatch.Groups[1].Value : null);
+            }
+            catch
+            {
+                return (null, null);
+            }
+        }
+
         private void Log(string text)
         {
             OnLog?.Invoke(text);
@@ -217,8 +301,12 @@ namespace GamingStackGUI
         /// Installs exactly what's passed in - the wizard (MainForm) is responsible
         /// for deciding that, whether it's the full catalog, a hand-picked subset, or
         /// (if the user picked nothing) an empty list, which is a no-op here.
+        /// <paramref name="applyTweaks"/> is the user's explicit answer to the
+        /// wizard's "Apply these tweaks?" prompt (see <see cref="PreviewTweaks"/>) -
+        /// this method never decides that for itself, same principle as the app
+        /// selection above it.
         /// </summary>
-        public async Task RunAsync(IReadOnlyList<AppEntry> selected)
+        public async Task RunAsync(IReadOnlyList<AppEntry> selected, bool applyTweaks)
         {
             try
             {
@@ -238,53 +326,61 @@ namespace GamingStackGUI
                 if (selected.Count == 0)
                 {
                     Log("Nothing selected - nothing to install.");
-                    return;
                 }
-
-                Log($"Installing {selected.Count} selected item(s)...");
-                Log("");
-
-                var wingetOk = IsWingetAvailable();
-                if (!wingetOk && selected.Any(a => a.Kind is AppKind.Winget or AppKind.Bundle))
+                else
                 {
-                    Log("WARNING: winget not found - winget-based selections will be skipped.");
-                    Fail("winget not found - install 'App Installer' from the Microsoft Store to install winget-based apps.");
-                }
+                    Log($"Installing {selected.Count} selected item(s)...");
+                    Log("");
 
-                foreach (var entry in selected)
-                {
-                    if (entry.Kind == AppKind.Winget)
+                    var wingetOk = IsWingetAvailable();
+                    if (!wingetOk && selected.Any(a => a.Kind is AppKind.Winget or AppKind.Bundle))
                     {
-                        if (!wingetOk)
-                        {
-                            Log($"[{entry.FriendlyName}] skipped - winget unavailable");
-                            OnItemResult?.Invoke(new ItemResult(entry, InstallResultKind.Skipped, "winget unavailable"));
-                            continue;
-                        }
-                        var (kind, detail) = await InstallWingetAppAsync(entry);
-                        OnItemResult?.Invoke(new ItemResult(entry, kind, detail));
+                        Log("WARNING: winget not found - winget-based selections will be skipped.");
+                        Fail("winget not found - install 'App Installer' from the Microsoft Store to install winget-based apps.");
                     }
-                    else if (entry.Kind == AppKind.Bundle)
+
+                    foreach (var entry in selected)
                     {
-                        if (!wingetOk)
+                        if (entry.Kind == AppKind.Winget)
                         {
-                            Log($"[{entry.FriendlyName}] skipped - winget unavailable");
-                            OnItemResult?.Invoke(new ItemResult(entry, InstallResultKind.Skipped, "winget unavailable"));
-                            continue;
+                            if (!wingetOk)
+                            {
+                                Log($"[{entry.FriendlyName}] skipped - winget unavailable");
+                                OnItemResult?.Invoke(new ItemResult(entry, InstallResultKind.Skipped, "winget unavailable"));
+                                continue;
+                            }
+                            var (kind, detail) = await InstallWingetAppAsync(entry);
+                            OnItemResult?.Invoke(new ItemResult(entry, kind, detail));
                         }
-                        var (kind, detail) = await InstallBundleAsync(entry);
-                        OnItemResult?.Invoke(new ItemResult(entry, kind, detail));
-                    }
-                    else
-                    {
-                        var (ok, detail) = await HandleManualInstallerAsync(entry);
-                        OnItemResult?.Invoke(new ItemResult(entry, ok ? InstallResultKind.Installed : InstallResultKind.Failed, detail));
+                        else if (entry.Kind == AppKind.Bundle)
+                        {
+                            if (!wingetOk)
+                            {
+                                Log($"[{entry.FriendlyName}] skipped - winget unavailable");
+                                OnItemResult?.Invoke(new ItemResult(entry, InstallResultKind.Skipped, "winget unavailable"));
+                                continue;
+                            }
+                            var (kind, detail) = await InstallBundleAsync(entry);
+                            OnItemResult?.Invoke(new ItemResult(entry, kind, detail));
+                        }
+                        else
+                        {
+                            var (ok, detail) = await HandleManualInstallerAsync(entry);
+                            OnItemResult?.Invoke(new ItemResult(entry, ok ? InstallResultKind.Installed : InstallResultKind.Failed, detail));
+                        }
                     }
                 }
 
                 Log("");
-                Log("Applying gaming tweaks...");
-                ApplyTweaks();
+                if (applyTweaks)
+                {
+                    Log("Applying gaming tweaks (you said yes to this)...");
+                    ApplyTweaks();
+                }
+                else
+                {
+                    Log("Gaming tweaks skipped - you said no.");
+                }
 
                 Log("");
                 if (File.Exists(FailFile))
@@ -531,13 +627,43 @@ namespace GamingStackGUI
             }
         }
 
+        /// <summary>
+        /// Only ever called after the user has explicitly agreed to it (see
+        /// <see cref="RunAsync"/>'s <c>applyTweaks</c> parameter and the wizard's
+        /// "Apply these tweaks?" prompt, built from <see cref="PreviewTweaks"/>).
+        /// Records each setting's real previous value before changing it, and writes
+        /// them out as a plain, human-readable .cmd script that puts everything back
+        /// exactly as it was - the "reversible" half of the disclosed/reversible rule
+        /// in ROADMAP.md. The script is regenerated every run, so it always reflects
+        /// what *this* run actually changed.
+        /// </summary>
         private void ApplyTweaks()
         {
+            var revertLines = new List<string>
+            {
+                "@echo off",
+                $"REM GamingStack tweak revert - generated {DateTime.Now:yyyy-MM-dd HH:mm:ss}",
+                "REM Restores the settings GamingStack changed after you said yes to \"Apply gaming",
+                "REM tweaks?\". Right-click this file and choose \"Run as administrator\" - the",
+                "REM registry lines below need elevation, same as GamingStack itself did.",
+                ""
+            };
+
             try
             {
-                using var key = Registry.LocalMachine.CreateSubKey(@"SOFTWARE\Microsoft\GameBar");
-                key?.SetValue("AllowAutoGameMode", 1, RegistryValueKind.DWord);
-                Log("[tweaks] Game Mode: enabled");
+                using var readKey = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\GameBar");
+                var existing = readKey?.GetValue("AllowAutoGameMode");
+
+                revertLines.Add("REM Game Mode");
+                revertLines.Add(existing == null
+                    ? @"reg delete ""HKLM\SOFTWARE\Microsoft\GameBar"" /v AllowAutoGameMode /f"
+                    : $@"reg add ""HKLM\SOFTWARE\Microsoft\GameBar"" /v AllowAutoGameMode /t REG_DWORD /d {Convert.ToInt32(existing)} /f");
+                revertLines.Add("");
+
+                using var writeKey = Registry.LocalMachine.CreateSubKey(@"SOFTWARE\Microsoft\GameBar");
+                writeKey?.SetValue("AllowAutoGameMode", 1, RegistryValueKind.DWord);
+                var was = existing == null ? "not set" : (Convert.ToInt32(existing) == 1 ? "enabled" : "disabled");
+                Log($"[tweaks] Game Mode: enabled (was: {was})");
             }
             catch (Exception ex)
             {
@@ -546,9 +672,19 @@ namespace GamingStackGUI
 
             try
             {
-                using var key = Registry.LocalMachine.CreateSubKey(@"SYSTEM\CurrentControlSet\Control\GraphicsDrivers");
-                key?.SetValue("HwSchMode", 2, RegistryValueKind.DWord);
-                Log("[tweaks] Hardware-accelerated GPU scheduling: enabled");
+                using var readKey = Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Control\GraphicsDrivers");
+                var existing = readKey?.GetValue("HwSchMode");
+
+                revertLines.Add("REM Hardware-accelerated GPU scheduling");
+                revertLines.Add(existing == null
+                    ? @"reg delete ""HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers"" /v HwSchMode /f"
+                    : $@"reg add ""HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers"" /v HwSchMode /t REG_DWORD /d {Convert.ToInt32(existing)} /f");
+                revertLines.Add("");
+
+                using var writeKey = Registry.LocalMachine.CreateSubKey(@"SYSTEM\CurrentControlSet\Control\GraphicsDrivers");
+                writeKey?.SetValue("HwSchMode", 2, RegistryValueKind.DWord);
+                var was = existing == null ? "not set" : (Convert.ToInt32(existing) == 2 ? "on" : "off");
+                Log($"[tweaks] Hardware-accelerated GPU scheduling: enabled (was: {was})");
             }
             catch (Exception ex)
             {
@@ -557,6 +693,14 @@ namespace GamingStackGUI
 
             try
             {
+                var (previousGuid, previousName) = GetActivePowerScheme();
+
+                revertLines.Add("REM Power plan");
+                revertLines.Add(previousGuid != null
+                    ? $"powercfg -setactive {previousGuid}"
+                    : "REM (couldn't read the previous power plan - nothing to restore here)");
+                revertLines.Add("");
+
                 // SCHEME_MIN is the built-in alias for the "High performance" power plan.
                 var psi = new ProcessStartInfo("powercfg", "-setactive SCHEME_MIN")
                 {
@@ -565,12 +709,26 @@ namespace GamingStackGUI
                 };
                 using var p = Process.Start(psi);
                 p?.WaitForExit(5000);
-                Log("[tweaks] Power plan: High performance");
+                Log($"[tweaks] Power plan: High performance (was: {previousName ?? "unknown"})");
             }
             catch (Exception ex)
             {
                 Fail($"Power plan tweak failed: {ex.Message}");
             }
+
+            try
+            {
+                Directory.CreateDirectory(_workDir);
+                TweaksRevertFilePath = Path.Combine(_workDir, "revert-tweaks.cmd");
+                File.WriteAllLines(TweaksRevertFilePath, revertLines);
+                Log($"[tweaks] To undo these, run (as Administrator): {TweaksRevertFilePath}");
+            }
+            catch (Exception ex)
+            {
+                Fail($"Couldn't write the tweak revert script: {ex.Message}");
+            }
+
+            TweaksApplied = true;
         }
     }
 }

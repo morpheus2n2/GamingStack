@@ -6,7 +6,7 @@
 ![Platform](https://img.shields.io/badge/platform-Windows-blue)
 ![.NET](https://img.shields.io/badge/.NET-8.0-purple)
 ![Status](https://img.shields.io/badge/status-WIP-orange)
-[![Version](https://img.shields.io/badge/version-0.13.3-brightgreen.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.16.0-brightgreen.svg)](CHANGELOG.md)
 
 A fully automated, over-the-top retro-styled Windows 11 gaming setup app.
 Boots through a fake BIOS screen (pulling your *real* motherboard/CPU/RAM/
@@ -43,9 +43,18 @@ to put it back.
   below
 - **Real installer**: installs the selected apps via `winget` with
   retries, silently installs every VC++ Redistributable version as one
-  bundled entry, handles a few apps that need manual download/install,
-  and applies a few gaming-related tweaks (Game Mode, hardware-accelerated
-  GPU scheduling, High Performance power plan)
+  bundled entry, and handles a few apps that need manual download/install
+- **A System Restore point, always** — created once app selection is
+  finalized, before anything installs or changes, no consent screen
+  needed for this one. On top of that, an **optional full disk-image
+  backup** (before any changes, or after everything's set up, your call)
+  — see [Restore point & backup](#restore-point--backup) below
+- **Optional gaming tweaks (Game Mode, hardware-accelerated GPU scheduling,
+  High Performance power plan)** — asked about explicitly, never applied
+  silently: a dedicated screen shows each one's real current value and
+  what it would change to, before anything happens. Saying yes writes a
+  `revert-tweaks.cmd` first, which restores every setting to exactly what
+  it was — see [Gaming tweaks](#gaming-tweaks) below
 - **Install summary** at the end of a run — totals plus a per-item
   installed/failed/skipped breakdown, grouped by category, with a
   plain-English reason next to anything that failed or was skipped (known
@@ -81,9 +90,80 @@ of what's on offer and asks:
    small easter egg, then the same sign-off screen you'd see after a
    real install.
 
+Once a real app selection is finalized (everything, or a hand-picked
+subset — even an empty one), a System Restore point is created, an
+optional full disk-image backup is offered, and then a screen asks about
+the gaming tweaks — in that order, before installing anything. See
+[Restore point & backup](#restore-point--backup) and
+[Gaming tweaks](#gaming-tweaks) below.
+
 After a real install run, the summary screen leads into a fake shutdown
 sequence before the sign-off screen — press any key to move past the
 summary, the rest plays itself out.
+
+## Restore point & backup
+
+Once app selection is finalized, GamingStack always creates a Windows
+System Restore point first — no screen to confirm it, it just happens,
+since it's the baseline safety net for everything that follows (installs
+included, not just the tweaks below). If System Restore happens to be off
+for the system drive (the Windows default on most consumer PCs), it's
+switched on and the restore point is retried once before giving up.
+
+On top of that, a screen offers a full disk-image backup via `wbadmin`:
+
+```
+[1] Before anything is installed or changed (a clean, "virgin machine" backup)
+[2] After everything is installed and tweaked (a "gaming ready" backup)
+[3] Skip the image backup - just the restore point above
+```
+
+Choosing 1 or 2 leads to a drive picker that auto-detects eligible drives
+(anything NTFS-formatted that isn't the system drive) and shows each
+one's free space next to the rough space the backup needs, so it's never
+a guess:
+
+```
+[1] E: (Backup Drive) - 412.0 GB free
+[2] F: (USB) - 58.0 GB free  (may not be enough room)
+```
+
+Whichever timing is chosen, the backup runs to completion before the flow
+continues — a backup racing against installs in the background would
+capture a half-changed system, not the clean before/after snapshot the
+choice is meant to give you. Expect it to take anywhere from a few minutes
+to a couple of hours depending on the destination, with a plain "don't
+turn off your PC" screen and an elapsed timer while it runs. The summary
+screen reports what actually happened to both the restore point and the
+backup, including the backup's own log file.
+
+## Gaming tweaks
+
+Once app selection is finalized, a dedicated screen lists the tweaks
+GamingStack can apply — Game Mode, hardware-accelerated GPU scheduling,
+and the High Performance power plan — each with its real current value
+(read live, not assumed) and what it would become:
+
+```
+Game Mode                            currently: not set (Windows default)  ->  enabled
+Hardware-accelerated GPU scheduling  currently: off                        ->  on
+Power plan                           currently: Balanced                  ->  High performance
+
+Apply these tweaks?   [Y] Yes    [N] No, skip tweaks
+```
+
+`N` skips every tweak — nothing is touched. `Y` applies them, but not
+before writing `revert-tweaks.cmd` next to the install log: a plain,
+readable script that restores every setting to exactly what it was
+before (or removes it entirely, if it wasn't set at all beforehand). Its
+full path is shown on this screen and again on the summary screen
+afterward, so it's never something you have to go hunting for. Run it as
+Administrator any time to undo everything this step changed.
+
+This applies to any future tweak added from `ROADMAP.md`, too — it's a
+hard rule for this project, not a one-off: nothing that changes a system
+setting happens without being shown on screen first, and nothing happens
+that can't be put back.
 
 ## What it installs
 
@@ -92,8 +172,8 @@ The wizard groups everything under a heading per category:
 - **Game Launchers** — Steam, Epic, GOG, Ubisoft Connect, Battle.net,
   Amazon Games, Discord, Playnite to tie the launchers together
 - **Monitoring & Performance** — NVIDIA App, HWiNFO, CPU-Z, Speccy,
-  CrystalDiskInfo, Process Lasso, Razer Cortex (direct download - no winget
-  package exists for it)
+  CrystalDiskInfo, Process Lasso, Microsoft PC Manager, Razer Cortex
+  (direct download - no winget package exists for it)
 - **Streaming & Recording** — Streamlabs Desktop, Medal.tv, Voicemeeter
   Banana
 - **General Utilities** — VS Code, PowerShell 7, Microsoft 365 Apps,
@@ -123,7 +203,10 @@ don't own that hardware.
 - [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0) if you're
   building it yourself
 - Admin rights — the app requests elevation on launch (needed for the
-  install/tweak stage)
+  install/tweak stage, and for the restore point/backup stage)
+- `wbadmin` — only needed if you choose the optional full disk-image
+  backup; ships with Windows 10/11 by default. Skipping that screen (or
+  picking "skip") doesn't need it at all
 
 ## Getting started
 

@@ -32,7 +32,21 @@ namespace GamingStackGUI
             PerApp,              // asking Y/N for one catalog entry at a time
             ConfirmQuit,         // "Just want to quit? Y/N"
             EasterEgg,           // declined everything - a little joke, then Farewell
+            ConfirmBackup,       // "Full disk-image backup: before / after / skip?" -
+                                 // shown once app selection is finalized, before
+                                 // ConfirmTweaks. Restore point always happens
+                                 // regardless of the answer here.
+            SelectBackupDrive,   // shown only if ConfirmBackup wasn't "skip" - pick a
+                                 // detected drive, or back out and skip
+            PreparingBackup,     // restore point + (if "before") the image backup;
+                                 // blocking, auto-advances to ConfirmTweaks when done
+            ConfirmTweaks,       // "Apply these gaming tweaks? Y/N" - shown once app
+                                 // selection is finalized, before Installing. Never
+                                 // skipped: tweaks only ever run after an explicit yes.
             Installing,          // InstallerEngine is actually running
+            RunningBackup,       // the "after" image backup, run once Installing
+                                 // finishes and before Summary - only reached if
+                                 // ConfirmBackup's answer was "after"
             Summary,             // end-of-run report (installed/failed/skipped), shown before ShuttingDown
             ShuttingDown,        // fake "shutting down" outro, auto-advances to Farewell
             Farewell             // final thank-you screen (reached from ShuttingDown or EasterEgg)
@@ -105,6 +119,27 @@ namespace GamingStackGUI
         private readonly List<AppEntry> _selectedApps = new();
         private int _perAppIndex;
         private bool?[] _perAppDecisions = Array.Empty<bool?>();
+
+        // ---- tweak consent (ConfirmTweaks phase) ----
+        // Populated from InstallerEngine.PreviewTweaks() right before showing the
+        // "Apply these tweaks?" screen, so what's on screen is always the real
+        // current value, not a guess. _applyTweaks is the user's actual Y/N answer -
+        // ApplyTweaks() in InstallerEngine never runs without it being true.
+        private List<InstallerEngine.TweakPreview> _tweakPreview = new();
+        private bool _applyTweaks;
+
+        // ---- restore point + optional full image backup ----
+        // The restore point always runs, no consent screen needed for it (see
+        // BackupEngine.CreateRestorePoint) - only the full image backup is a
+        // choice, and that choice is made once, right after app selection is
+        // finalized. _backupDriveOptions is a live read (BackupEngine.FindEligibleDrives)
+        // taken right before showing SelectBackupDrive, same "real value, not a
+        // guess" principle as the tweaks screen.
+        private readonly BackupEngine _backup = new();
+        private BackupTiming _backupTiming = BackupTiming.Skip;
+        private string? _backupDrive;
+        private List<DriveOption> _backupDriveOptions = new();
+        private bool _noEligibleBackupDrive;
 
         // Per-item outcomes for the Summary screen, populated via InstallerEngine's
         // OnItemResult (fired on a background task, hence the lock) rather than by
@@ -245,6 +280,14 @@ namespace GamingStackGUI
                     if (_terminalLines.Count > 300) _terminalLines.RemoveAt(0);
                 }
             };
+            _backup.OnLog += line =>
+            {
+                lock (_terminalLock)
+                {
+                    _terminalLines.Add(line);
+                    if (_terminalLines.Count > 300) _terminalLines.RemoveAt(0);
+                }
+            };
             _installer.OnItemResult += result =>
             {
                 lock (_itemResultLock) { _itemResults.Add(result); }
@@ -275,8 +318,17 @@ namespace GamingStackGUI
                 if (_selectedApps.Count > 0 && _phaseWatch.ElapsedMilliseconds < SpeedrunThresholdMs)
                     UnlockAchievement("speedrunner");
 
-                _wizardPhase = WizardPhase.Summary;
-                _phaseWatch.Restart();
+                if (_backupTiming == BackupTiming.After && _backupDrive != null)
+                {
+                    _wizardPhase = WizardPhase.RunningBackup;
+                    _phaseWatch.Restart();
+                    _ = RunAfterBackupAsync();
+                }
+                else
+                {
+                    _wizardPhase = WizardPhase.Summary;
+                    _phaseWatch.Restart();
+                }
             };
 
             _timer.Tick += (_, _) =>
@@ -775,6 +827,82 @@ namespace GamingStackGUI
 
         // ---------- install wizard ----------
 
+        // Reads the real current value of every tweak (via InstallerEngine.PreviewTweaks -
+        // a pure read, nothing changes here) and shows the consent screen built from
+        // it. Both paths that finish app selection (ConfirmAll's yes, and PerApp
+        // running out of items) route through here instead of going straight to
+        // StartInstall() - tweaks never run without this screen being shown first.
+        private void GoToConfirmTweaks()
+        {
+            _tweakPreview = InstallerEngine.PreviewTweaks();
+            _wizardPhase = WizardPhase.ConfirmTweaks;
+        }
+
+        // First stop once app selection is finalized, before ConfirmTweaks - the
+        // restore point + optional full image backup happen ahead of the tweaks
+        // question, since they're a safety net for everything that follows,
+        // installs included, not just the three tweaks.
+        private void GoToConfirmBackup()
+        {
+            _backupTiming = BackupTiming.Skip;
+            _backupDrive = null;
+            _noEligibleBackupDrive = false;
+            _wizardPhase = WizardPhase.ConfirmBackup;
+        }
+
+        // Only reached if ConfirmBackup's answer was "before" or "after" - a fresh
+        // read of what's actually plugged in right now (nothing changes here).
+        // An empty result skips cleanly with a clear reason shown on the next
+        // screen, rather than the wizard getting stuck with nothing to pick.
+        private void GoToSelectBackupDriveOrSkip()
+        {
+            _backupDriveOptions = BackupEngine.FindEligibleDrives();
+            if (_backupDriveOptions.Count == 0)
+            {
+                _noEligibleBackupDrive = true;
+                _backupTiming = BackupTiming.Skip;
+                GoToPreparingBackup();
+            }
+            else
+            {
+                _noEligibleBackupDrive = false;
+                _wizardPhase = WizardPhase.SelectBackupDrive;
+            }
+        }
+
+        // Blocking step: always creates the restore point, then (only if the
+        // timing chosen was "before") runs the full image backup to completion
+        // before moving on - a backup racing against the installs that follow it
+        // would capture a half-changed system, not the clean "before" snapshot the
+        // user asked for.
+        private void GoToPreparingBackup()
+        {
+            _wizardPhase = WizardPhase.PreparingBackup;
+            _phaseWatch.Restart();
+            _ = RunPreparingBackupAsync();
+        }
+
+        private async Task RunPreparingBackupAsync()
+        {
+            await Task.Run(() => _backup.CreateRestorePoint());
+
+            if (_backupTiming == BackupTiming.Before && _backupDrive != null)
+                await _backup.RunImageBackupAsync(_backupDrive);
+
+            GoToConfirmTweaks();
+        }
+
+        // The "after" counterpart - only reached from the OnFinished handler once
+        // Installing (apps + tweaks) is fully done.
+        private async Task RunAfterBackupAsync()
+        {
+            if (_backupDrive != null)
+                await _backup.RunImageBackupAsync(_backupDrive);
+
+            _wizardPhase = WizardPhase.Summary;
+            _phaseWatch.Restart();
+        }
+
         private void StartInstall()
         {
             lock (_itemResultLock) { _itemResults.Clear(); }
@@ -787,7 +915,7 @@ namespace GamingStackGUI
         {
             try
             {
-                await _installer.RunAsync(_selectedApps);
+                await _installer.RunAsync(_selectedApps, _applyTweaks);
             }
             catch (Exception ex)
             {
@@ -797,6 +925,20 @@ namespace GamingStackGUI
             }
         }
 
+        // 1/2/3 (top row or numpad) as a plain 0-based index - shared by
+        // ConfirmBackup's three options and SelectBackupDrive's drive list, since
+        // neither of those is a Y/N question.
+        private static int? DigitIndex(Keys key) => key switch
+        {
+            Keys.D1 or Keys.NumPad1 => 0,
+            Keys.D2 or Keys.NumPad2 => 1,
+            Keys.D3 or Keys.NumPad3 => 2,
+            Keys.D4 or Keys.NumPad4 => 3,
+            Keys.D5 or Keys.NumPad5 => 4,
+            Keys.D6 or Keys.NumPad6 => 5,
+            _ => null
+        };
+
         private void HandleWizardKey(Keys key)
         {
             // Any key dismisses the summary - it's a report, not a Y/N question.
@@ -805,6 +947,34 @@ namespace GamingStackGUI
             {
                 _wizardPhase = WizardPhase.ShuttingDown;
                 _phaseWatch.Restart();
+                return;
+            }
+
+            // Neither of these is a Y/N question, so they're handled before the
+            // Y/N shortcut below intercepts anything that isn't Y or N.
+            if (_wizardPhase == WizardPhase.ConfirmBackup)
+            {
+                var choice = DigitIndex(key);
+                if (choice == 0) { _backupTiming = BackupTiming.Before; GoToSelectBackupDriveOrSkip(); }
+                else if (choice == 1) { _backupTiming = BackupTiming.After; GoToSelectBackupDriveOrSkip(); }
+                else if (choice == 2 || key == Keys.N) { _backupTiming = BackupTiming.Skip; GoToPreparingBackup(); }
+                return;
+            }
+
+            if (_wizardPhase == WizardPhase.SelectBackupDrive)
+            {
+                if (key == Keys.N)
+                {
+                    _backupTiming = BackupTiming.Skip;
+                    GoToPreparingBackup();
+                    return;
+                }
+                var index = DigitIndex(key);
+                if (index != null && index < _backupDriveOptions.Count)
+                {
+                    _backupDrive = _backupDriveOptions[index.Value].RootPath;
+                    GoToPreparingBackup();
+                }
                 return;
             }
 
@@ -825,7 +995,7 @@ namespace GamingStackGUI
                         _selectedApps.Clear();
                         _selectedApps.AddRange(InstallerEngine.Catalog);
                         UnlockAchievement("completionist");
-                        StartInstall();
+                        GoToConfirmBackup();
                     }
                     else
                     {
@@ -852,7 +1022,12 @@ namespace GamingStackGUI
                     if (answer) _selectedApps.Add(InstallerEngine.Catalog[_perAppIndex]);
                     _perAppIndex++;
                     if (_perAppIndex >= InstallerEngine.Catalog.Count)
-                        StartInstall();
+                        GoToConfirmBackup();
+                    break;
+
+                case WizardPhase.ConfirmTweaks:
+                    _applyTweaks = answer;
+                    StartInstall();
                     break;
 
                 case WizardPhase.ConfirmQuit:
@@ -1365,8 +1540,25 @@ namespace GamingStackGUI
 
             switch (_wizardPhase)
             {
+                case WizardPhase.ConfirmBackup:
+                    DrawConfirmBackup(g, fullX, fullY, fullW, fullH, titleHeight);
+                    break;
+                case WizardPhase.SelectBackupDrive:
+                    DrawSelectBackupDrive(g, fullX, fullY, fullW, fullH, titleHeight);
+                    break;
+                case WizardPhase.PreparingBackup:
+                    DrawBackupProgress(g, fullX, fullY, fullW, fullH, titleHeight,
+                        "Preparing your PC - this can take a while, please don't turn off your computer.");
+                    break;
+                case WizardPhase.ConfirmTweaks:
+                    DrawConfirmTweaks(g, fullX, fullY, fullW, fullH, titleHeight);
+                    break;
                 case WizardPhase.Installing:
                     DrawInstallerLog(g, fullX, fullY, fullW, fullH, titleHeight, elapsed);
+                    break;
+                case WizardPhase.RunningBackup:
+                    DrawBackupProgress(g, fullX, fullY, fullW, fullH, titleHeight,
+                        "Running your full disk-image backup - this can take a while, please don't turn off your computer.");
                     break;
                 case WizardPhase.Summary:
                     DrawSummary(g, fullX, fullY, fullW, fullH, titleHeight);
@@ -1592,6 +1784,145 @@ namespace GamingStackGUI
             public readonly Font Font;
             public readonly Brush Brush;
             public WizardLine(string text, Font font, Brush brush) { Text = text; Font = font; Brush = brush; }
+        }
+
+        // The disclosure screen itself: every tweak, its real current value, and
+        // what it would become, drawn in full immediately (no typewriter effect -
+        // by this point the catalog's already fully typed, and this is a short
+        // consent screen rather than a big reveal). Nothing here has changed
+        // anything on the machine yet - that only happens in InstallerEngine's
+        // ApplyTweaks(), and only if the user answers Y to the prompt at the bottom.
+        // "Before" and "after" are asked as a single three-way choice rather than a
+        // Y/N gate per option, since exactly one of the three applies - matches
+        // how the choice actually works instead of forcing three separate
+        // yes/no questions to express one decision.
+        private void DrawConfirmBackup(Graphics g, int fullX, int fullY, int fullW, int fullH, int titleHeight)
+        {
+            var contentX = fullX + 16;
+            const int lineHeight = 18;
+
+            var headingTop = fullY + titleHeight + 10 + lineHeight;
+            g.DrawString("A System Restore point is always created before anything changes - no need to ask about that.",
+                _monoSmall, Brushes.Gainsboro, contentX, headingTop);
+            g.DrawString("On top of that, GamingStack can also do a full disk-image backup, if you'd like one:",
+                _monoSmall, Brushes.Gainsboro, contentX, headingTop + lineHeight);
+
+            var listTop = headingTop + lineHeight * 2 + 14;
+            var needed = BackupEngine.EstimatedNeededBytes();
+            g.DrawString($"[1] Before anything is installed or changed (a clean, \"virgin machine\" backup)",
+                _monoSmall, Brushes.Gold, contentX, listTop);
+            g.DrawString($"[2] After everything is installed and tweaked (a \"gaming ready\" backup)",
+                _monoSmall, Brushes.Gold, contentX, listTop + lineHeight);
+            g.DrawString($"[3] Skip the image backup - just the restore point above",
+                _monoSmall, Brushes.Gold, contentX, listTop + lineHeight * 2);
+
+            var noteTop = listTop + lineHeight * 3 + 14;
+            g.DrawString($"A full backup needs roughly {BackupEngine.FormatBytes(needed)} free on another drive, and can take a",
+                _monoSmall, Brushes.DimGray, contentX, noteTop);
+            g.DrawString("while - the next screen shows what's available so you can judge for yourself.",
+                _monoSmall, Brushes.DimGray, contentX, noteTop + lineHeight);
+
+            var promptTop = noteTop + lineHeight * 2 + 16;
+            using var promptFont = new Font("Consolas", 14f, FontStyle.Bold);
+            g.DrawString("Choose 1, 2 or 3", promptFont, Brushes.Gold, contentX, promptTop);
+        }
+
+        private void DrawSelectBackupDrive(Graphics g, int fullX, int fullY, int fullW, int fullH, int titleHeight)
+        {
+            var contentX = fullX + 16;
+            const int lineHeight = 18;
+
+            var headingTop = fullY + titleHeight + 10 + lineHeight;
+            var timingLabel = _backupTiming == BackupTiming.Before ? "before installing anything" : "after everything's installed";
+            g.DrawString($"Pick a drive for the backup ({timingLabel}):", _monoSmall, Brushes.Gainsboro, contentX, headingTop);
+
+            var needed = BackupEngine.EstimatedNeededBytes();
+            var listTop = headingTop + lineHeight + 10;
+
+            if (_backupDriveOptions.Count == 0)
+            {
+                g.DrawString("No eligible drives detected right now (needs a non-system, NTFS-formatted drive).",
+                    _monoSmall, Brushes.Gold, contentX, listTop);
+            }
+            else
+            {
+                for (int i = 0; i < _backupDriveOptions.Count; i++)
+                {
+                    var d = _backupDriveOptions[i];
+                    var enoughRoom = needed <= 0 || d.FreeBytes >= needed;
+                    var brush = enoughRoom ? Brushes.LightGreen : Brushes.OrangeRed;
+                    var roomNote = enoughRoom ? "" : "  (may not be enough room)";
+                    g.DrawString($"[{i + 1}] {d.Label} - {BackupEngine.FormatBytes(d.FreeBytes)} free{roomNote}",
+                        _monoSmall, brush, contentX, listTop + i * lineHeight);
+                }
+            }
+
+            var promptTop = listTop + Math.Max(1, _backupDriveOptions.Count) * lineHeight + 16;
+            using var promptFont = new Font("Consolas", 14f, FontStyle.Bold);
+            var prompt = _backupDriveOptions.Count == 0
+                ? "Press [N] to continue without an image backup"
+                : $"Choose 1-{_backupDriveOptions.Count}, or [N] to skip the image backup";
+            g.DrawString(prompt, promptFont, Brushes.Gold, contentX, promptTop);
+        }
+
+        // Shared by PreparingBackup (restore point + optional "before" image
+        // backup) and RunningBackup (the "after" image backup) - both are the same
+        // "don't touch anything, this takes a while" blocking screen, just with a
+        // different message and a different Stopwatch driving the elapsed time.
+        private void DrawBackupProgress(Graphics g, int fullX, int fullY, int fullW, int fullH, int titleHeight, string message)
+        {
+            var contentX = fullX + 16;
+            const int lineHeight = 18;
+
+            var headingTop = fullY + titleHeight + 10 + lineHeight;
+            foreach (var line in WrapTextToWidth(g, message, _monoSmall, fullW - 32))
+            {
+                g.DrawString(line, _monoSmall, Brushes.Gainsboro, contentX, headingTop);
+                headingTop += lineHeight;
+            }
+
+            if (_noEligibleBackupDrive)
+            {
+                g.DrawString("(No eligible backup drive was found - continuing with just the restore point.)",
+                    _monoSmall, Brushes.Gold, contentX, headingTop + 6);
+                headingTop += lineHeight;
+            }
+
+            var elapsed = TimeSpan.FromMilliseconds(_phaseWatch.ElapsedMilliseconds);
+            g.DrawString($"Elapsed: {elapsed:mm\\:ss}", _monoSmall, Brushes.DimGray, contentX, headingTop + 14);
+        }
+
+        private void DrawConfirmTweaks(Graphics g, int fullX, int fullY, int fullW, int fullH, int titleHeight)
+        {
+            var contentX = fullX + 16;
+            const int lineHeight = 18;
+
+            var headingTop = fullY + titleHeight + 10 + lineHeight;
+            g.DrawString("A few optional gaming tweaks are recommended - nothing is applied without your OK:",
+                _monoSmall, Brushes.Gainsboro, contentX, headingTop);
+
+            var listTop = headingTop + lineHeight + 10;
+            var nameWidth = _tweakPreview.Count == 0
+                ? 0f
+                : _tweakPreview.Max(t => g.MeasureString(t.Name, _monoSmall).Width) + 24;
+
+            for (int i = 0; i < _tweakPreview.Count; i++)
+            {
+                var t = _tweakPreview[i];
+                var ly = listTop + i * lineHeight;
+                g.DrawString(t.Name, _monoSmall, Brushes.Gainsboro, contentX, ly);
+                g.DrawString($"currently: {t.Current}  ->  {t.NewValue}", _monoSmall, Brushes.Gold, contentX + nameWidth, ly);
+            }
+
+            var noteTop = listTop + _tweakPreview.Count * lineHeight + 14;
+            g.DrawString("Saying yes writes an undo script (revert-tweaks.cmd) before changing anything,",
+                _monoSmall, Brushes.DimGray, contentX, noteTop);
+            g.DrawString("so every change here can be put back exactly as it was.",
+                _monoSmall, Brushes.DimGray, contentX, noteTop + lineHeight);
+
+            var promptTop = noteTop + lineHeight * 2 + 16;
+            using var promptFont = new Font("Consolas", 14f, FontStyle.Bold);
+            g.DrawString("Apply these tweaks?   [Y] Yes    [N] No, skip tweaks", promptFont, Brushes.Gold, contentX, promptTop);
         }
 
         private void DrawWizard(Graphics g, int fullX, int fullY, int fullW, int fullH, int titleHeight)
@@ -1864,7 +2195,68 @@ namespace GamingStackGUI
             if (_installer.LogFilePath != null)
                 g.DrawString($"Full log: {_installer.LogFilePath}", _monoSmall, Brushes.DimGray, contentX, logLineTop);
 
-            var listTop = logLineTop + lineHeight + 10;
+            // Tweaks are never silent - this is where the run reports exactly what
+            // happened to the "Apply these tweaks?" question, matching whatever the
+            // ConfirmTweaks screen disclosed beforehand.
+            var tweaksLineTop = logLineTop + lineHeight;
+            if (_installer.TweaksApplied)
+            {
+                g.DrawString("Tweaks: applied (Game Mode, HAGS, High performance power plan)",
+                    _monoSmall, Brushes.Gold, contentX, tweaksLineTop);
+                tweaksLineTop += lineHeight;
+                if (_installer.TweaksRevertFilePath != null)
+                    g.DrawString($"  Undo them (run as Administrator): {_installer.TweaksRevertFilePath}",
+                        _monoSmall, Brushes.DimGray, contentX, tweaksLineTop);
+            }
+            else
+            {
+                g.DrawString("Tweaks: skipped - you said no", _monoSmall, Brushes.Gray, contentX, tweaksLineTop);
+            }
+
+            // Restore point + optional image backup - same "never silent" principle.
+            var backupLineTop = tweaksLineTop + lineHeight + 2;
+            if (_backup.RestorePointCreated)
+            {
+                g.DrawString("Restore point: created", _monoSmall, Brushes.Gold, contentX, backupLineTop);
+            }
+            else
+            {
+                g.DrawString($"Restore point: failed - {_backup.RestorePointError ?? "unknown reason"}",
+                    _monoSmall, Brushes.OrangeRed, contentX, backupLineTop);
+            }
+            backupLineTop += lineHeight;
+
+            switch (_backupTiming)
+            {
+                case BackupTiming.Skip:
+                    g.DrawString(_noEligibleBackupDrive
+                            ? "Image backup: skipped - no eligible drive was found"
+                            : "Image backup: skipped - you said no",
+                        _monoSmall, Brushes.Gray, contentX, backupLineTop);
+                    backupLineTop += lineHeight;
+                    break;
+                default:
+                    var timingLabel = _backupTiming == BackupTiming.Before ? "before changes" : "after setup";
+                    if (_backup.ImageBackupSucceeded)
+                    {
+                        g.DrawString($"Image backup: completed ({timingLabel}) -> {_backup.ImageBackupDestination}",
+                            _monoSmall, Brushes.Gold, contentX, backupLineTop);
+                    }
+                    else
+                    {
+                        g.DrawString($"Image backup: failed ({timingLabel}) - {_backup.ImageBackupError ?? "unknown reason"}",
+                            _monoSmall, Brushes.OrangeRed, contentX, backupLineTop);
+                    }
+                    backupLineTop += lineHeight;
+                    if (_backup.LogFilePath != null)
+                    {
+                        g.DrawString($"  Backup log: {_backup.LogFilePath}", _monoSmall, Brushes.DimGray, contentX, backupLineTop);
+                        backupLineTop += lineHeight;
+                    }
+                    break;
+            }
+
+            var listTop = backupLineTop + 10;
             var colWidth = (fullW - 32) / 2;
 
             // Room for the detail line's "    " indent plus a small gutter, so a long

@@ -24,14 +24,23 @@ does the same follows the same two rules, no exceptions:
 An idea that can't satisfy both isn't in scope for this project, however
 useful it might be.
 
+**This rule was written down after the fact - the existing Game Mode/HAGS/
+power plan tweaks had already shipped without either half of it.** Fixed
+in 0.14.0: a "Apply these tweaks?" consent screen (real current value ->
+new value, shown before anything changes) and an auto-generated
+`revert-tweaks.cmd` that restores everything to what it was. See
+`CHANGELOG.md`'s 0.14.0 entry. Any tweak added from this list starts from
+that same pattern - it's the template, not just the rule.
+
 ## System tweaks
 
-- **Restore point before any tweaks run** - a "before we touch anything"
-  safety net, and a natural fit for the install flow's tone. Also makes
-  every tweak below trustworthy by default.
-- **Tweak log on the summary screen** - extend the existing summary so it
-  lists exactly what was changed *and* what it was before (not just "Game
-  Mode: enabled", but "Game Mode: enabled (was: disabled)").
+- ~~Restore point before any tweaks run~~ - **done in 0.15.0**: a System
+  Restore point is now always created once app selection is finalized,
+  before anything installs or changes - no consent screen needed for this
+  one, it's the mandatory baseline. Paired with an optional full
+  disk-image backup (before changes or after setup, auto-detected
+  destination drive, blocks until done) for the times a restore point
+  alone isn't enough. See `CHANGELOG.md`'s 0.15.0 entry.
 - **Explorer tweaks** - show file extensions, show hidden files, restore
   the classic (non-condensed) right-click context menu.
 - **Taskbar/Start decluttering** - hide widgets, hide the search box,
@@ -64,6 +73,35 @@ useful it might be.
 - **DS4Windows / Steam Input helper** - for non-Xbox controllers.
 - **A clipboard manager** (e.g. Ditto) - small quality-of-life win.
 - **WinDirStat / WizTree** - visualize disk usage after a big install run.
+- **TMOG (Task Manager OG)** - Dave Plummer's (original 1996 Windows Task
+  Manager author) modern task manager/system monitor, from
+  [tmog.org](https://tmog.org). Free beta available, paid Pro tier. Held
+  back for now because the site doesn't mention a winget package or a
+  GitHub repo, and none could be found in `winget-pkgs` either - no stable
+  unattended install path yet. Worth re-checking later, since a project
+  with this much community goodwill often gets a winget package
+  eventually.
+- **ASUS Armoury Crate** - RGB/fan/AIO control for ASUS motherboards and
+  peripherals. A winget package exists (`Asus.ArmouryCrate`), but it's
+  had at least one manifest break already: ASUS hosts the installer
+  behind a version-agnostic URL, so when they quietly swap the file
+  behind it the hash-pinned winget manifest stops working until someone
+  notices and re-pins it (see
+  [winget-pkgs#430531](https://github.com/microsoft/winget-pkgs/pull/430531)).
+  Same category of problem as Razer Cortex/Hyte Nexus/L-Connect 3 above,
+  just via winget instead of a manual link - worth adding once there's
+  a manual-download fallback path to fall back on if the winget install
+  fails, matching how those three are already handled.
+- **"PC Smart Utility"** - the user asked about this by name, but it
+  couldn't be confidently identified. There's a Microsoft Store listing
+  under this name describing an all-in-one cleanup/monitoring/"PC health
+  score" tool, which reads a lot like generic system-optimizer software
+  (a category that's frequently low-quality or borderline scareware) and
+  its actual publisher couldn't be confirmed as Microsoft or anyone else
+  from the store listing alone. Not adding anything under this name
+  until it's confirmed exactly what tool is meant - if the user meant a
+  specific different product, worth asking for a link next time it comes
+  up.
 
 ## Automation / quality of life
 

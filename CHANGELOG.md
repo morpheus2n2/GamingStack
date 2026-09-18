@@ -11,6 +11,83 @@ Everything below `0.6.2` predates versioning entirely, so those entries are
 backfilled from the original milestone-based changelog and given version
 numbers retroactively - there's no real date for them, only relative order.
 
+## [0.16.0] - Microsoft PC Manager added to the catalog
+
+### Added
+- **Microsoft PC Manager** (`Microsoft.PCManager` on winget) to the
+  Monitoring & Performance category - Microsoft's own first-party
+  CPU/RAM/GPU monitoring, storage cleanup and startup-app manager.
+  Confirmed installable via winget (still labelled Beta upstream, but the
+  package itself installs cleanly). Opt-in and skippable like every other
+  catalog entry.
+
+### Notes
+- Investigated three other apps the user asked about while testing
+  0.15.0: TMOG (tmog.org), ASUS Armoury Crate, and "PC Smart Utility".
+  None added to the catalog this round - see `ROADMAP.md`'s "Apps to add
+  to the catalog" section for why each was held back (no confirmed
+  unattended install path for TMOG, a known winget-manifest fragility for
+  Armoury Crate, and an unconfirmed/unclear identity for "PC Smart
+  Utility").
+
+## [0.15.0] - Restore point + optional full disk-image backup
+
+### Added
+- **A System Restore point is now always created** once app selection is
+  finalized, before anything installs or changes - no consent screen for
+  this one, it's a mandatory safety net (see `ROADMAP.md`'s "always always
+  happen" rule). Tries the direct route first; if System Restore is off for
+  the drive (the Windows default on most consumer machines), enables it and
+  retries once rather than failing silently on the first attempt.
+- **A new `BackupEngine` class** handling the restore point and an optional
+  full disk-image backup via `wbadmin` (the engine behind the old "Backup
+  and Restore (Windows 7)" control panel item - still the only scriptable
+  full-image option on Windows 11). Decoupled from `InstallerEngine` the
+  same way that's decoupled from `MainForm` - its own class, its own log
+  file (`backup_<timestamp>.log`).
+- **New wizard screen: "Full disk-image backup?"** — shown right after app
+  selection is finalized, before the tweaks question. Three choices: before
+  any changes (a "virgin machine" backup), after everything's installed (a
+  "gaming ready" backup), or skip it. Choosing before/after leads to a
+  drive-picker screen that auto-detects eligible drives (non-system, NTFS)
+  and shows each one's free space next to the rough space the backup needs,
+  so nothing is a guess.
+- The backup step **blocks** until it finishes (with a plain "this can take
+  a while, don't turn off your PC" screen and an elapsed timer) rather than
+  running in the background - a backup racing against installs/tweaks would
+  capture a half-changed system instead of a clean before/after snapshot.
+- The summary screen now reports the restore point's real outcome and,
+  where relevant, the image backup's outcome, destination, and log path.
+
+## [0.14.0] - Disclosed, reversible gaming tweaks
+
+### Fixed
+- **The gaming tweaks (Game Mode, hardware-accelerated GPU scheduling, the
+  power plan) were being applied automatically at the end of every install
+  run, with no on-screen disclosure and no way back.** This broke the
+  disclosed/reversible rule written down in `ROADMAP.md` last night, and
+  had been true since these tweaks were first added. Fixed properly:
+
+### Added
+- **New wizard step: "Apply these tweaks?"** — shown once app selection is
+  finalized, before anything installs. Lists each tweak by name with its
+  *real current value* (read live via the registry/`powercfg`, not assumed)
+  and what it would change to. `N` skips every tweak entirely; tweaks now
+  only ever run after an explicit `Y`.
+- **A `revert-tweaks.cmd` script, written before any tweak is applied** —
+  captures the exact previous value of each setting (or the right command
+  to remove it entirely, if it wasn't set before) and restores them with
+  one script run as Administrator. Regenerated every run, and its path is
+  shown both on the consent screen and the summary screen afterward.
+- The summary screen now reports what actually happened to the tweaks
+  question — applied (with the revert script's path) or skipped — instead
+  of assuming they always ran.
+
+### Changed
+- `InstallerEngine.RunAsync` now takes an explicit `applyTweaks` flag from
+  the wizard instead of deciding for itself; `ApplyTweaks()` is only ever
+  called when that's `true`.
+
 ## [0.13.3] - Roadmap + repo docs refresh
 
 ### Added

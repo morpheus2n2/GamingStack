@@ -78,6 +78,11 @@ publish. Everything lives in one process:
     logic, only how `DrawWizard` in `MainForm.cs` groups the on-screen
     list under a heading. Add a new category by just giving an `AppEntry`
     a category string that doesn't exist yet.
+- `BackupEngine.cs` - the restore point + optional full disk-image backup,
+  decoupled from the UI the same way `InstallerEngine` is (its own `OnLog`
+  event, its own log file). See "Restore point / backup" below for the
+  detail - it's a separate concern from app installs, not a mode of
+  `InstallerEngine`.
 
 ## Stage flow (`MainForm.cs`)
 
@@ -119,15 +124,26 @@ Bios -> Boot -> Desktop -> Terminal
   - `N` to choosing individually -> `ConfirmQuit`; `Y` closes the app,
     `N` -> `EasterEgg` (an original wobbling floppy-disk mascot, 5s) then
     `Farewell`.
-  - Once a selection is made (full catalog or a hand-picked subset,
-    even if empty), `StartInstall()` runs `InstallerEngine.RunAsync(_selectedApps)`
+  - Once a selection is made (full catalog or a hand-picked subset, even if
+    empty), both paths route through `GoToConfirmBackup()` rather than
+    straight to `StartInstall()` - see Restore point/backup below for that
+    step, which always ends by calling `GoToConfirmTweaks()`. That calls
+    the static, read-only `InstallerEngine.PreviewTweaks()` (real current
+    values, nothing changed) and shows `ConfirmTweaks`, a dedicated "Apply
+    these tweaks?" screen (`DrawConfirmTweaks`). Only that screen's own Y/N
+    answer (`_applyTweaks`) decides whether tweaks run - see Gaming tweaks
+    disclosure below.
+  - `StartInstall()` then runs `InstallerEngine.RunAsync(_selectedApps, _applyTweaks)`
     on a background task and streams its `OnLog` output into a scrolling,
     thread-safe log (`_terminalLines`, guarded by `_terminalLock`).
     `InstallerEngine` also fires a structured `OnItemResult` event per
     selected entry (`Installed`/`Failed`/`Skipped`), collected into
     `_itemResults` (guarded by `_itemResultLock`) - this, not the
     free-text log, is what the summary screen renders from.
-    `OnFinished` transitions to `Summary`, not straight to `Farewell`.
+    `OnFinished` transitions to `Summary` - or, if `_backupTiming ==
+    BackupTiming.After`, to `RunningBackup` first (`RunAfterBackupAsync`
+    runs the image backup to completion, then moves on to `Summary`) -
+    never straight to `Farewell` either way.
   - `Summary` (`DrawSummary`) reports what actually happened: totals plus
     a per-item breakdown grouped under the same category headings the
     wizard used (reuses `_wizardColumn0`/`_wizardColumn1`). Any key moves
@@ -148,6 +164,50 @@ text copied from real Windows. Everything visual is original artwork
 to "find" or "source" real Win9x boot animations/images, don't - explain
 why and offer an original alternative instead, same as previously agreed
 with the user.
+
+## Gaming tweaks constraint - important
+
+Same weight as the copyright rule above: **no system-level tweak (registry,
+power plan, or anything else) may run without an explicit on-screen Y/N
+consent screen showing its real current value first, and every tweak must
+be reversible.** This wasn't followed when Game Mode/HAGS/the power plan
+were first added - they ran automatically at the end of every install with
+no disclosure and no way back - and got fixed properly in 0.14.0:
+`InstallerEngine.PreviewTweaks()` (static, read-only) feeds a
+`ConfirmTweaks` wizard screen (`DrawConfirmTweaks` in `MainForm.cs`) shown
+before `StartInstall()`, and `ApplyTweaks()` writes a `revert-tweaks.cmd`
+capturing each setting's real previous value *before* changing anything,
+regenerated every run. `RunAsync`'s `applyTweaks` parameter is the only
+thing that gates `ApplyTweaks()` - never call it unconditionally again, and
+never add a new tweak that skips this pattern (preview -> consent screen ->
+apply -> revert script), whatever the reason.
+
+## Restore point / backup (`BackupEngine.cs`) - important
+
+A System Restore point is the one exception to "always ask first" above -
+the user was explicit that it "should always always happen", so
+`GoToConfirmBackup()` runs it unconditionally via
+`BackupEngine.CreateRestorePoint()` before any screen asks about anything
+else. It tries the direct WMI call (`root\default:SystemRestore`,
+`CreateRestorePoint`) first, then falls back to enabling System Restore
+for the system drive (`powershell -Command Enable-ComputerRestore`) and
+retrying once if the first attempt failed - don't remove that retry, it
+exists because the user has personally had restore points silently fail
+before, more than once.
+
+The optional full disk-image backup (`wbadmin start backup`) *does* follow
+the disclosed/reversible pattern: `ConfirmBackup` asks before/after/skip,
+`SelectBackupDrive` shows `BackupEngine.FindEligibleDrives()` (a pure read)
+with each drive's free space next to `EstimatedNeededBytes()` rather than
+silently filtering options out, and the backup itself blocks
+(`PreparingBackup`/`RunningBackup`, both drawn via the shared
+`DrawBackupProgress`) rather than racing in the background - a backup that
+runs concurrently with installs would capture a half-changed system, not
+the clean before/after snapshot the whole feature is for. Both the restore
+point's and the backup's real outcome are reported on `Summary`
+(`_backup.RestorePointCreated`/`RestorePointError`,
+`ImageBackupSucceeded`/`ImageBackupError`/`ImageBackupDestination`) - never
+assume either one succeeded just because it was attempted.
 
 ## Next steps
 

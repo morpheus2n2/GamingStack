@@ -11,6 +11,24 @@ Everything below `0.6.2` predates versioning entirely, so those entries are
 backfilled from the original milestone-based changelog and given version
 numbers retroactively - there's no real date for them, only relative order.
 
+## [0.13.3] - Roadmap + repo docs refresh
+
+### Added
+- **`ROADMAP.md`** — the full backlog of ideas beyond the original build
+  order (system tweaks, apps, automation, fun/easter eggs), grouped by
+  kind, plus the standing rule that governs all of it: any system-level
+  tweak must be disclosed on screen and must be reversible, no exceptions.
+
+### Changed
+- README: broadened the intro to reflect this as an ongoing project rather
+  than a finished checklist, linked `ROADMAP.md` from both the intro and
+  the (now-complete) in-README roadmap checklist, and called out the
+  disclosed/reversible rule in the Safety note.
+- `CLAUDE.md`: replaced the stale "Next steps" list (most of it had already
+  shipped) with a pointer to `ROADMAP.md` and the same disclosed/reversible
+  rule, so future work here starts from the current backlog instead of an
+  outdated one.
+
 ## [0.13.2] - Konami clue grouping fix
 
 ### Fixed

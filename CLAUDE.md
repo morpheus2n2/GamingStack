@@ -151,15 +151,24 @@ with the user.
 
 ## Next steps
 
-The installer stack is built (`InstallerEngine.cs`) - winget loop with
-retries, manual-installer fallback chain, and gaming tweaks, all logging
-into the terminal window, plus a structured per-item summary (0.7.0+).
-Still open:
-- Real boot animation assets (the flag/clouds/sky are original placeholder
-  artwork, described in the Boot stage above)
+The original build order (installer stack, wizard, summary, shutdown
+outro, achievement toasts, Konami code, real boot animation art) is
+complete as of 0.13.2 - see `CHANGELOG.md` for the full history.
+
+Everything under consideration beyond that lives in `ROADMAP.md`, grouped
+by kind (system tweaks, apps, automation, fun/easter eggs). The one rule
+that governs all of it, stated explicitly by the user and non-negotiable:
+**any tweak that touches a system setting must be disclosed on screen
+before/as it happens, and must be reversible** - either by the app
+recording and restoring the previous value, or because it's just a
+standard Windows setting the user could flip back themselves. An idea that
+can't satisfy both isn't in scope, no matter how useful.
+
+Ongoing maintenance notes:
 - MSI Afterburner has no reliable winget package and no verified stable
   direct-download URL was available when the manual-installer list was
-  built - add it there if/when a good source is confirmed
+  built - add it there if/when a good source is confirmed (it's also
+  listed in `ROADMAP.md`'s app list).
 - Every winget ID in the catalog was checked directly against the
   winget-pkgs repo as of 0.7.1 (this is what caught Razer Cortex never
   having had a real package ID, and two other IDs that had drifted -

@@ -6,14 +6,22 @@
 ![Platform](https://img.shields.io/badge/platform-Windows-blue)
 ![.NET](https://img.shields.io/badge/.NET-8.0-purple)
 ![Status](https://img.shields.io/badge/status-WIP-orange)
-[![Version](https://img.shields.io/badge/version-0.13.2-brightgreen.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.13.3-brightgreen.svg)](CHANGELOG.md)
 
 A fully automated, over-the-top retro-styled Windows 11 gaming setup app.
-Boots through a fake BIOS screen (pulling your *real* CPU/RAM/GPU/disk info),
-into an original Win95-inspired boot animation, onto a desktop, then opens a
-terminal window that installs a full gaming/streaming app stack and applies
-gaming tweaks — all in one self-contained app, no scripts or extra files to
-lose. Download it, run it, walk away.
+Boots through a fake BIOS screen (pulling your *real* motherboard/CPU/RAM/
+GPU/disk info), into an original Win95-inspired boot animation, onto a
+desktop, then opens a terminal window that installs a full gaming/streaming
+app stack and applies gaming tweaks — all in one self-contained app, no
+scripts or extra files to lose. Download it, run it, walk away.
+
+The core setup flow (below) is done and stable. Beyond that, this is an
+actively growing project — see [`ROADMAP.md`](ROADMAP.md) for everything
+being considered next (more tweaks, more apps, more automation, more fun).
+Every idea there follows one non-negotiable rule: **anything that changes a
+system setting is disclosed on screen before or as it happens, and can be
+undone.** Nothing here ever changes something silently or leaves you unable
+to put it back.
 
 ## Features
 
@@ -152,6 +160,8 @@ expected.
 
 ## Roadmap
 
+The original build order is complete:
+
 - [x] Retro boot sequence (BIOS, boot animation, desktop, terminal)
 - [x] Real installer stack (winget loop, manual installer fallback, tweaks)
 - [x] Interactive install wizard (install all / pick individually / quit)
@@ -161,12 +171,21 @@ expected.
 - [x] Konami code easter egg
 - [x] Real boot animation assets (hand-pixelled sprites, original artwork)
 
+Everything under consideration beyond that — more system tweaks, more apps,
+more automation, more fun — lives in [`ROADMAP.md`](ROADMAP.md), grouped by
+kind, along with the disclosed/reversible rule anything system-changing has
+to follow before it's in scope.
+
 ## Safety note
 
 This app requests admin rights and will install applications and modify
 registry settings on your machine. Test it in a VM or a spare machine
 before running it on anything you care about, and review the app list in
-`InstallerEngine.cs` before running it on your own PC.
+`InstallerEngine.cs` before running it on your own PC. Every system-level
+tweak it applies (today: Game Mode, hardware-accelerated GPU scheduling,
+the power plan) is a standard, documented Windows setting — nothing here
+is a hidden or one-way change, and that stays true for anything added from
+[`ROADMAP.md`](ROADMAP.md) going forward.
 
 ## Credits & copyright
 

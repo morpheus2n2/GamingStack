@@ -39,8 +39,11 @@ namespace GamingStackGUI
             SelectBackupDrive,   // shown only if ConfirmBackup wasn't "skip" - pick a
                                  // detected drive, or back out and skip
             PreparingBackup,     // restore point + (if "before") the image backup;
-                                 // blocking, auto-advances to ConfirmTweaks when done
-            ConfirmTweaks,       // "Apply these gaming tweaks? Y/N" - shown once app
+                                 // blocking, auto-advances to ChoosePowerPlan when done
+            ChoosePowerPlan,     // "[1] High performance [2] Ultimate Performance" -
+                                 // shown once, right before ConfirmTweaks, since the
+                                 // power plan tweak needs to know which one to preview
+            ConfirmTweaks,       // "Apply these tweaks? Y/N" - shown once app
                                  // selection is finalized, before Installing. Never
                                  // skipped: tweaks only ever run after an explicit yes.
             Installing,          // InstallerEngine is actually running
@@ -127,6 +130,10 @@ namespace GamingStackGUI
         // ApplyTweaks() in InstallerEngine never runs without it being true.
         private List<InstallerEngine.TweakPreview> _tweakPreview = new();
         private bool _applyTweaks;
+        // Answered once on the ChoosePowerPlan screen, right before ConfirmTweaks -
+        // defaults to High (the safe, always-available choice) so a bug in wiring the
+        // ChoosePowerPlan phase in can never silently end up on Ultimate.
+        private InstallerEngine.PowerPlanChoice _powerPlanChoice = InstallerEngine.PowerPlanChoice.High;
 
         // ---- restore point + optional full image backup ----
         // The restore point always runs, no consent screen needed for it (see
@@ -601,6 +608,13 @@ namespace GamingStackGUI
                 diskCursor += 300;
             }
 
+            // Read-only reporting, not a tweak - no consent screen needed, same as
+            // the disk list above it. Sits here rather than on ConfirmTweaks since
+            // nothing changes; it's just telling you what's already true.
+            var trim = GetTrimStatus();
+            Add(diskCursor, $"  TRIM (delete notify): {trim}", trim == "enabled" ? Color.LightGreen : Color.Gold);
+            diskCursor += 300;
+
             // Its own heading (matching the Graphics Adapter/Storage Devices pattern
             // above) rather than tacking onto the disk list - it was reading as just
             // another storage entry before. Disguised as an ordinary peripheral
@@ -672,14 +686,19 @@ namespace GamingStackGUI
             var results = new List<string>();
             try
             {
-                using var searcher = new ManagementObjectSearcher("SELECT Model, Size FROM Win32_DiskDrive");
+                // Status is real WMI health data (usually "OK"; a failing drive
+                // reports something else, e.g. "Pred Fail") rather than a hardcoded
+                // "OK" - this is the read-only storage health half of the NVMe
+                // TRIM/storage health check idea from ROADMAP.md.
+                using var searcher = new ManagementObjectSearcher("SELECT Model, Size, Status FROM Win32_DiskDrive");
                 foreach (var obj in searcher.Get())
                 {
                     var model = obj["Model"]?.ToString() ?? "Unknown Disk";
                     var sizeGb = obj["Size"] != null
                         ? (long)Math.Round(Convert.ToInt64(obj["Size"]) / 1024.0 / 1024.0 / 1024.0)
                         : 0;
-                    results.Add($"{model} - {sizeGb}GB - OK");
+                    var status = obj["Status"]?.ToString();
+                    results.Add($"{model} - {sizeGb}GB - {(string.IsNullOrWhiteSpace(status) ? "OK" : status)}");
                 }
             }
             catch
@@ -688,6 +707,38 @@ namespace GamingStackGUI
             }
             if (results.Count == 0) results.Add("Unknown Disk - OK");
             return results;
+        }
+
+        /// <summary>
+        /// Whether NTFS delete notify (TRIM) is enabled system-wide - read via
+        /// `fsutil behavior query DisableDeleteNotify`, the standard, documented way
+        /// to check this (there's no WMI class for it). This is read-only reporting,
+        /// not a tweak: nothing here changes anything, so it has no consent screen
+        /// and doesn't go through InstallerEngine's tweak pattern.
+        /// </summary>
+        private static string GetTrimStatus()
+        {
+            try
+            {
+                var psi = new ProcessStartInfo("fsutil", "behavior query DisableDeleteNotify")
+                {
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    CreateNoWindow = true
+                };
+                using var p = Process.Start(psi);
+                if (p == null) return "unknown";
+                var output = p.StandardOutput.ReadToEnd();
+                p.WaitForExit(3000);
+
+                var match = System.Text.RegularExpressions.Regex.Match(output, @"DisableDeleteNotify\s*=\s*(\d)");
+                if (!match.Success) return "unknown";
+                return match.Groups[1].Value == "0" ? "enabled" : "disabled";
+            }
+            catch
+            {
+                return "unknown";
+            }
         }
 
         // ---------- stage progression ----------
@@ -829,19 +880,29 @@ namespace GamingStackGUI
 
         // Reads the real current value of every tweak (via InstallerEngine.PreviewTweaks -
         // a pure read, nothing changes here) and shows the consent screen built from
-        // it. Both paths that finish app selection (ConfirmAll's yes, and PerApp
-        // running out of items) route through here instead of going straight to
-        // StartInstall() - tweaks never run without this screen being shown first.
+        // it. Reached only from ChoosePowerPlan, so the power-plan tweak's preview
+        // already knows which plan to show as the target - tweaks never run without
+        // this screen being shown first.
         private void GoToConfirmTweaks()
         {
-            _tweakPreview = InstallerEngine.PreviewTweaks();
+            _tweakPreview = InstallerEngine.PreviewTweaks(_powerPlanChoice);
             _wizardPhase = WizardPhase.ConfirmTweaks;
         }
 
-        // First stop once app selection is finalized, before ConfirmTweaks - the
+        // One question, asked once, right before ConfirmTweaks: which power plan the
+        // "Power plan" tweak row should target. Ultimate Performance is a real,
+        // Microsoft-documented hidden plan (same idea as High Performance, just with
+        // the last few power-saving throttles removed) - not on by default because it
+        // has no benefit on laptops and a small idle-power cost on desktops.
+        private void GoToChoosePowerPlan()
+        {
+            _wizardPhase = WizardPhase.ChoosePowerPlan;
+        }
+
+        // First stop once app selection is finalized, before ChoosePowerPlan - the
         // restore point + optional full image backup happen ahead of the tweaks
         // question, since they're a safety net for everything that follows,
-        // installs included, not just the three tweaks.
+        // installs included, not just the tweaks themselves.
         private void GoToConfirmBackup()
         {
             _backupTiming = BackupTiming.Skip;
@@ -889,7 +950,7 @@ namespace GamingStackGUI
             if (_backupTiming == BackupTiming.Before && _backupDrive != null)
                 await _backup.RunImageBackupAsync(_backupDrive);
 
-            GoToConfirmTweaks();
+            GoToChoosePowerPlan();
         }
 
         // The "after" counterpart - only reached from the OnFinished handler once
@@ -915,7 +976,7 @@ namespace GamingStackGUI
         {
             try
             {
-                await _installer.RunAsync(_selectedApps, _applyTweaks);
+                await _installer.RunAsync(_selectedApps, _applyTweaks, _powerPlanChoice);
             }
             catch (Exception ex)
             {
@@ -975,6 +1036,14 @@ namespace GamingStackGUI
                     _backupDrive = _backupDriveOptions[index.Value].RootPath;
                     GoToPreparingBackup();
                 }
+                return;
+            }
+
+            if (_wizardPhase == WizardPhase.ChoosePowerPlan)
+            {
+                var choice = DigitIndex(key);
+                if (choice == 0) { _powerPlanChoice = InstallerEngine.PowerPlanChoice.High; GoToConfirmTweaks(); }
+                else if (choice == 1) { _powerPlanChoice = InstallerEngine.PowerPlanChoice.Ultimate; GoToConfirmTweaks(); }
                 return;
             }
 
@@ -1550,6 +1619,9 @@ namespace GamingStackGUI
                     DrawBackupProgress(g, fullX, fullY, fullW, fullH, titleHeight,
                         "Preparing your PC - this can take a while, please don't turn off your computer.");
                     break;
+                case WizardPhase.ChoosePowerPlan:
+                    DrawChoosePowerPlan(g, fullX, fullY, fullW, fullH, titleHeight);
+                    break;
                 case WizardPhase.ConfirmTweaks:
                     DrawConfirmTweaks(g, fullX, fullY, fullW, fullH, titleHeight);
                     break;
@@ -1892,13 +1964,41 @@ namespace GamingStackGUI
             g.DrawString($"Elapsed: {elapsed:mm\\:ss}", _monoSmall, Brushes.DimGray, contentX, headingTop + 14);
         }
 
+        private void DrawChoosePowerPlan(Graphics g, int fullX, int fullY, int fullW, int fullH, int titleHeight)
+        {
+            var contentX = fullX + 16;
+            const int lineHeight = 18;
+
+            var headingTop = fullY + titleHeight + 10 + lineHeight;
+            g.DrawString("One of the tweaks coming up sets the active power plan. Which one?",
+                _monoSmall, Brushes.Gainsboro, contentX, headingTop);
+
+            var listTop = headingTop + lineHeight + 14;
+            g.DrawString("[1] High performance - Windows' own built-in plan (recommended)",
+                _monoSmall, Brushes.Gold, contentX, listTop);
+            g.DrawString("[2] Ultimate Performance - a hidden Microsoft plan with the last few",
+                _monoSmall, Brushes.Gold, contentX, listTop + lineHeight);
+            g.DrawString("    power-saving throttles removed on top of High performance",
+                _monoSmall, Brushes.Gold, contentX, listTop + lineHeight * 2);
+
+            var noteTop = listTop + lineHeight * 3 + 14;
+            g.DrawString("Ultimate Performance is real and Microsoft-documented, just hidden by default since it",
+                _monoSmall, Brushes.DimGray, contentX, noteTop);
+            g.DrawString("has no benefit on a laptop and a small idle-power cost on a desktop that's plugged in.",
+                _monoSmall, Brushes.DimGray, contentX, noteTop + lineHeight);
+
+            var promptTop = noteTop + lineHeight * 2 + 16;
+            using var promptFont = new Font("Consolas", 14f, FontStyle.Bold);
+            g.DrawString("Choose 1 or 2", promptFont, Brushes.Gold, contentX, promptTop);
+        }
+
         private void DrawConfirmTweaks(Graphics g, int fullX, int fullY, int fullW, int fullH, int titleHeight)
         {
             var contentX = fullX + 16;
             const int lineHeight = 18;
 
             var headingTop = fullY + titleHeight + 10 + lineHeight;
-            g.DrawString("A few optional gaming tweaks are recommended - nothing is applied without your OK:",
+            g.DrawString("A few optional tweaks are recommended - nothing is applied without your OK:",
                 _monoSmall, Brushes.Gainsboro, contentX, headingTop);
 
             var listTop = headingTop + lineHeight + 10;
@@ -2201,7 +2301,7 @@ namespace GamingStackGUI
             var tweaksLineTop = logLineTop + lineHeight;
             if (_installer.TweaksApplied)
             {
-                g.DrawString("Tweaks: applied (Game Mode, HAGS, High performance power plan)",
+                g.DrawString("Tweaks: applied (see the revert script for exactly what changed)",
                     _monoSmall, Brushes.Gold, contentX, tweaksLineTop);
                 tweaksLineTop += lineHeight;
                 if (_installer.TweaksRevertFilePath != null)

@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
+using System.Management;
 using System.Net.Http;
 using System.Threading.Tasks;
 using Microsoft.Win32;
@@ -217,7 +218,23 @@ namespace GamingStackGUI
         /// </summary>
         public readonly record struct TweakPreview(string Name, string Current, string NewValue);
 
-        public static List<TweakPreview> PreviewTweaks()
+        /// <summary>
+        /// Which power plan the "Power plan" tweak targets - answered once on the
+        /// wizard's ChoosePowerPlan screen, right before the tweaks it feeds into
+        /// PreviewTweaks/ApplyTweaks so the preview always matches what will actually
+        /// run. Ultimate is the hidden, more aggressive plan Microsoft ships but
+        /// doesn't surface in Settings by default.
+        /// </summary>
+        public enum PowerPlanChoice { High, Ultimate }
+
+        // Microsoft's own fixed template GUID for the hidden "Ultimate Performance"
+        // plan - documented in Microsoft's own Tech Community post introducing it.
+        // `powercfg -duplicatescheme` against this GUID creates a real, visible,
+        // switchable copy of it (Windows doesn't let you activate the hidden
+        // template directly on modern builds - it has to be duplicated first).
+        private const string UltimatePerformanceTemplateGuid = "e9a42b02-d5df-448d-aa00-03f14749eb61";
+
+        public static List<TweakPreview> PreviewTweaks(PowerPlanChoice powerPlanChoice)
         {
             var list = new List<TweakPreview>();
 
@@ -242,10 +259,165 @@ namespace GamingStackGUI
             list.Add(new TweakPreview("Hardware-accelerated GPU scheduling", hags, "on"));
 
             var (_, planName) = GetActivePowerScheme();
-            list.Add(new TweakPreview("Power plan", planName ?? "unknown", "High performance"));
+            var powerPlanTarget = powerPlanChoice == PowerPlanChoice.Ultimate ? "Ultimate Performance" : "High performance";
+            list.Add(new TweakPreview("Power plan", planName ?? "unknown", powerPlanTarget));
+
+            try
+            {
+                using var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced");
+                var val = key?.GetValue("HideFileExt");
+                var current = val == null ? "hidden (Windows default)" : (Convert.ToInt32(val) == 0 ? "shown" : "hidden");
+                list.Add(new TweakPreview("File extensions", current, "shown"));
+            }
+            catch { list.Add(new TweakPreview("File extensions", "unknown", "shown")); }
+
+            try
+            {
+                using var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced");
+                var val = key?.GetValue("Hidden");
+                var current = val == null ? "hidden (Windows default)" : (Convert.ToInt32(val) == 1 ? "shown" : "hidden");
+                list.Add(new TweakPreview("Hidden files", current, "shown"));
+            }
+            catch { list.Add(new TweakPreview("Hidden files", "unknown", "shown")); }
+
+            try
+            {
+                var exists = Registry.CurrentUser.OpenSubKey(ClassicContextMenuKeyPath) != null;
+                list.Add(new TweakPreview("Right-click context menu", exists ? "already classic" : "modern (Windows 11 default)", "classic (full menu, no \"Show more options\")"));
+            }
+            catch { list.Add(new TweakPreview("Right-click context menu", "unknown", "classic")); }
+
+            try
+            {
+                using var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced");
+                var val = key?.GetValue("TaskbarDa");
+                var current = val == null ? "shown (Windows default)" : (Convert.ToInt32(val) == 0 ? "hidden" : "shown");
+                list.Add(new TweakPreview("Taskbar widgets button", current, "hidden"));
+            }
+            catch { list.Add(new TweakPreview("Taskbar widgets button", "unknown", "hidden")); }
+
+            try
+            {
+                using var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Search");
+                var val = key?.GetValue("SearchboxTaskbarMode");
+                var current = val == null ? "shown (Windows default)" : (Convert.ToInt32(val) == 0 ? "hidden" : "shown");
+                list.Add(new TweakPreview("Taskbar search box", current, "hidden"));
+            }
+            catch { list.Add(new TweakPreview("Taskbar search box", "unknown", "hidden")); }
+
+            try
+            {
+                using var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced");
+                var val = key?.GetValue("ShowCopilotButton");
+                var current = val == null ? "shown (Windows default)" : (Convert.ToInt32(val) == 0 ? "hidden" : "shown");
+                list.Add(new TweakPreview("Taskbar Copilot button", current, "hidden"));
+            }
+            catch { list.Add(new TweakPreview("Taskbar Copilot button", "unknown", "hidden")); }
+
+            try
+            {
+                using var key = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile");
+                var val = key?.GetValue("SystemResponsiveness");
+                var current = val == null ? "20% (Windows default)" : $"{Convert.ToInt32(val)}%";
+                list.Add(new TweakPreview("Background task CPU reservation (MMCSS)", current, "0% (games get full priority)"));
+            }
+            catch { list.Add(new TweakPreview("Background task CPU reservation (MMCSS)", "unknown", "0%")); }
+
+            try
+            {
+                using var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager");
+                var suggestions = key?.GetValue("SystemPaneSuggestionsEnabled");
+                var ads = key?.GetValue("SubscribedContent-338388Enabled");
+                var current = (suggestions == null && ads == null)
+                    ? "shown (Windows default)"
+                    : ((suggestions == null || Convert.ToInt32(suggestions) == 1) || (ads == null || Convert.ToInt32(ads) == 1) ? "shown" : "hidden");
+                list.Add(new TweakPreview("Start menu suggestions/ads", current, "hidden"));
+            }
+            catch { list.Add(new TweakPreview("Start menu suggestions/ads", "unknown", "hidden")); }
+
+            try
+            {
+                using var key = Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Control\Session Manager\Power");
+                var val = key?.GetValue("HiberbootEnabled");
+                var current = val == null ? "on (Windows default)" : (Convert.ToInt32(val) == 1 ? "on" : "off");
+                list.Add(new TweakPreview("Fast Startup", current, "off"));
+            }
+            catch { list.Add(new TweakPreview("Fast Startup", "unknown", "off")); }
+
+            try
+            {
+                using var key = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\WindowsUpdate\UX\Settings");
+                var start = key?.GetValue("ActiveHoursStart");
+                var end = key?.GetValue("ActiveHoursEnd");
+                var current = (start == null && end == null)
+                    ? "08:00-17:00 (Windows default)"
+                    : $"{Convert.ToInt32(start ?? 8):D2}:00-{Convert.ToInt32(end ?? 17):D2}:00";
+                list.Add(new TweakPreview("Windows Update active hours", current, "16:00-23:00 (typical evening gaming window)"));
+            }
+            catch { list.Add(new TweakPreview("Windows Update active hours", "unknown", "16:00-23:00")); }
+
+            try
+            {
+                using var key = Registry.CurrentUser.OpenSubKey(@"System\GameConfigStore");
+                var val = key?.GetValue("GameDVR_Enabled");
+                var current = val == null ? "enabled (Windows default)" : (Convert.ToInt32(val) == 1 ? "enabled" : "disabled");
+                list.Add(new TweakPreview("Xbox Game Bar / Game DVR", current, "disabled"));
+            }
+            catch { list.Add(new TweakPreview("Xbox Game Bar / Game DVR", "unknown", "disabled")); }
+
+            try
+            {
+                var ifacePath = GetActiveNetworkInterfaceRegistryPath();
+                if (ifacePath == null)
+                {
+                    list.Add(new TweakPreview("Network latency (Nagle's algorithm)", "no active network adapter found", "disabled"));
+                }
+                else
+                {
+                    using var key = Registry.LocalMachine.OpenSubKey(ifacePath);
+                    var ack = key?.GetValue("TcpAckFrequency");
+                    var noDelay = key?.GetValue("TCPNoDelay");
+                    var current = (ack == null && noDelay == null)
+                        ? "not set (Windows default, Nagle's algorithm enabled)"
+                        : (Convert.ToInt32(ack) == 1 && Convert.ToInt32(noDelay) == 1 ? "disabled" : "partially set");
+                    list.Add(new TweakPreview("Network latency (Nagle's algorithm)", current, "disabled"));
+                }
+            }
+            catch { list.Add(new TweakPreview("Network latency (Nagle's algorithm)", "unknown", "disabled")); }
 
             return list;
         }
+
+        /// <summary>
+        /// Finds the registry path for the network interface actually in use right
+        /// now (has IP + a default gateway) via WMI, since Nagle's algorithm is
+        /// controlled per-interface under `Tcpip\Parameters\Interfaces\{GUID}`, not
+        /// globally. Returns null if no active adapter can be identified.
+        /// </summary>
+        private static string? GetActiveNetworkInterfaceRegistryPath()
+        {
+            try
+            {
+                using var searcher = new ManagementObjectSearcher(
+                    "SELECT SettingID FROM Win32_NetworkAdapterConfiguration WHERE IPEnabled = True AND DefaultIPGateway IS NOT NULL");
+                foreach (var obj in searcher.Get())
+                {
+                    var settingId = obj["SettingID"]?.ToString();
+                    if (!string.IsNullOrWhiteSpace(settingId))
+                        return $@"SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces\{settingId}";
+                }
+            }
+            catch { /* falls through to null below */ }
+            return null;
+        }
+
+        // CLSID that, when registered with a blank InprocServer32 default value, tells
+        // Explorer to fall back to the classic (pre-Windows 11) right-click context
+        // menu - the full list up front instead of needing "Show more options". This
+        // is a well-documented, widely-used Explorer shell extension override, not an
+        // undocumented hack; deleting the key (see ApplyTweaks) reverts it cleanly.
+        private const string ClassicContextMenuKeyPath =
+            @"Software\Classes\CLSID\{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}\InprocServer32";
 
         /// <summary>
         /// Reads the currently active power plan via `powercfg /getactivescheme`,
@@ -280,6 +452,72 @@ namespace GamingStackGUI
             }
         }
 
+        /// <summary>
+        /// Scans `powercfg /list` for a scheme whose friendly name matches exactly,
+        /// returning its real GUID - used to find a previously-duplicated "Ultimate
+        /// Performance" plan so re-running the tweak doesn't create a fresh duplicate
+        /// every time.
+        /// </summary>
+        private static string? FindPowerSchemeGuidByName(string name)
+        {
+            try
+            {
+                var psi = new ProcessStartInfo("powercfg", "/list")
+                {
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    CreateNoWindow = true
+                };
+                using var p = Process.Start(psi);
+                if (p == null) return null;
+                var output = p.StandardOutput.ReadToEnd();
+                p.WaitForExit(3000);
+
+                foreach (var line in output.Split('\n'))
+                {
+                    if (!line.Contains($"({name})")) continue;
+                    var guidMatch = System.Text.RegularExpressions.Regex.Match(line,
+                        @"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}");
+                    if (guidMatch.Success) return guidMatch.Value;
+                }
+                return null;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Runs `powercfg -duplicatescheme &lt;templateGuid&gt;`, which creates a new,
+        /// real, switchable power plan copied from a template (visible or hidden) and
+        /// returns its freshly-assigned GUID from the command's own output.
+        /// </summary>
+        private static string? DuplicatePowerScheme(string templateGuid)
+        {
+            try
+            {
+                var psi = new ProcessStartInfo("powercfg", $"-duplicatescheme {templateGuid}")
+                {
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    CreateNoWindow = true
+                };
+                using var p = Process.Start(psi);
+                if (p == null) return null;
+                var output = p.StandardOutput.ReadToEnd();
+                p.WaitForExit(5000);
+
+                var guidMatch = System.Text.RegularExpressions.Regex.Match(output,
+                    @"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}");
+                return guidMatch.Success ? guidMatch.Value : null;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
         private void Log(string text)
         {
             OnLog?.Invoke(text);
@@ -306,7 +544,7 @@ namespace GamingStackGUI
         /// this method never decides that for itself, same principle as the app
         /// selection above it.
         /// </summary>
-        public async Task RunAsync(IReadOnlyList<AppEntry> selected, bool applyTweaks)
+        public async Task RunAsync(IReadOnlyList<AppEntry> selected, bool applyTweaks, PowerPlanChoice powerPlanChoice)
         {
             try
             {
@@ -374,12 +612,12 @@ namespace GamingStackGUI
                 Log("");
                 if (applyTweaks)
                 {
-                    Log("Applying gaming tweaks (you said yes to this)...");
-                    ApplyTweaks();
+                    Log("Applying tweaks (you said yes to this)...");
+                    ApplyTweaks(powerPlanChoice);
                 }
                 else
                 {
-                    Log("Gaming tweaks skipped - you said no.");
+                    Log("Tweaks skipped - you said no.");
                 }
 
                 Log("");
@@ -637,13 +875,13 @@ namespace GamingStackGUI
         /// in ROADMAP.md. The script is regenerated every run, so it always reflects
         /// what *this* run actually changed.
         /// </summary>
-        private void ApplyTweaks()
+        private void ApplyTweaks(PowerPlanChoice powerPlanChoice)
         {
             var revertLines = new List<string>
             {
                 "@echo off",
                 $"REM GamingStack tweak revert - generated {DateTime.Now:yyyy-MM-dd HH:mm:ss}",
-                "REM Restores the settings GamingStack changed after you said yes to \"Apply gaming",
+                "REM Restores the settings GamingStack changed after you said yes to \"Apply these",
                 "REM tweaks?\". Right-click this file and choose \"Run as administrator\" - the",
                 "REM registry lines below need elevation, same as GamingStack itself did.",
                 ""
@@ -701,19 +939,321 @@ namespace GamingStackGUI
                     : "REM (couldn't read the previous power plan - nothing to restore here)");
                 revertLines.Add("");
 
-                // SCHEME_MIN is the built-in alias for the "High performance" power plan.
-                var psi = new ProcessStartInfo("powercfg", "-setactive SCHEME_MIN")
+                if (powerPlanChoice == PowerPlanChoice.Ultimate)
                 {
-                    UseShellExecute = false,
-                    CreateNoWindow = true
-                };
-                using var p = Process.Start(psi);
-                p?.WaitForExit(5000);
-                Log($"[tweaks] Power plan: High performance (was: {previousName ?? "unknown"})");
+                    // Windows doesn't let modern builds activate the hidden Ultimate
+                    // Performance template GUID directly - it has to be duplicated
+                    // into a real, visible plan first. Reuse an existing duplicate if
+                    // one's already there from a previous run, rather than creating a
+                    // fresh (and identical) copy every single time.
+                    var existingGuid = FindPowerSchemeGuidByName("Ultimate Performance");
+                    var targetGuid = existingGuid ?? DuplicatePowerScheme(UltimatePerformanceTemplateGuid);
+
+                    if (targetGuid != null)
+                    {
+                        var psi = new ProcessStartInfo("powercfg", $"-setactive {targetGuid}")
+                        {
+                            UseShellExecute = false,
+                            CreateNoWindow = true
+                        };
+                        using var p = Process.Start(psi);
+                        p?.WaitForExit(5000);
+                        Log($"[tweaks] Power plan: Ultimate Performance (was: {previousName ?? "unknown"})");
+                    }
+                    else
+                    {
+                        Fail("Power plan tweak failed: couldn't create the Ultimate Performance plan");
+                    }
+                }
+                else
+                {
+                    // SCHEME_MIN is the built-in alias for the "High performance" power plan.
+                    var psi = new ProcessStartInfo("powercfg", "-setactive SCHEME_MIN")
+                    {
+                        UseShellExecute = false,
+                        CreateNoWindow = true
+                    };
+                    using var p = Process.Start(psi);
+                    p?.WaitForExit(5000);
+                    Log($"[tweaks] Power plan: High performance (was: {previousName ?? "unknown"})");
+                }
             }
             catch (Exception ex)
             {
                 Fail($"Power plan tweak failed: {ex.Message}");
+            }
+
+            try
+            {
+                using var readKey = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced");
+                var existing = readKey?.GetValue("HideFileExt");
+
+                revertLines.Add("REM File extensions");
+                revertLines.Add(existing == null
+                    ? @"reg delete ""HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced"" /v HideFileExt /f"
+                    : $@"reg add ""HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced"" /v HideFileExt /t REG_DWORD /d {Convert.ToInt32(existing)} /f");
+                revertLines.Add("");
+
+                using var writeKey = Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced");
+                writeKey?.SetValue("HideFileExt", 0, RegistryValueKind.DWord);
+                var was = existing == null ? "hidden (default)" : (Convert.ToInt32(existing) == 0 ? "shown" : "hidden");
+                Log($"[tweaks] File extensions: shown (was: {was})");
+            }
+            catch (Exception ex)
+            {
+                Fail($"File extensions tweak failed: {ex.Message}");
+            }
+
+            try
+            {
+                using var readKey = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced");
+                var existing = readKey?.GetValue("Hidden");
+
+                revertLines.Add("REM Hidden files");
+                revertLines.Add(existing == null
+                    ? @"reg delete ""HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced"" /v Hidden /f"
+                    : $@"reg add ""HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced"" /v Hidden /t REG_DWORD /d {Convert.ToInt32(existing)} /f");
+                revertLines.Add("");
+
+                using var writeKey = Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced");
+                writeKey?.SetValue("Hidden", 1, RegistryValueKind.DWord);
+                var was = existing == null ? "hidden (default)" : (Convert.ToInt32(existing) == 1 ? "shown" : "hidden");
+                Log($"[tweaks] Hidden files: shown (was: {was})");
+            }
+            catch (Exception ex)
+            {
+                Fail($"Hidden files tweak failed: {ex.Message}");
+            }
+
+            try
+            {
+                var alreadyExisted = Registry.CurrentUser.OpenSubKey(ClassicContextMenuKeyPath) != null;
+
+                revertLines.Add("REM Right-click context menu");
+                revertLines.Add(alreadyExisted
+                    ? "REM (already classic before this run - nothing to restore here)"
+                    : @"reg delete ""HKCU\Software\Classes\CLSID\{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}"" /f");
+                revertLines.Add("");
+
+                using var writeKey = Registry.CurrentUser.CreateSubKey(ClassicContextMenuKeyPath);
+                writeKey?.SetValue(string.Empty, string.Empty, RegistryValueKind.String);
+                Log($"[tweaks] Right-click context menu: classic (was: {(alreadyExisted ? "already classic" : "modern")}) - takes effect after Explorer restarts or you sign in again");
+            }
+            catch (Exception ex)
+            {
+                Fail($"Classic context menu tweak failed: {ex.Message}");
+            }
+
+            try
+            {
+                using var readKey = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced");
+                var existing = readKey?.GetValue("TaskbarDa");
+
+                revertLines.Add("REM Taskbar widgets button");
+                revertLines.Add(existing == null
+                    ? @"reg delete ""HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced"" /v TaskbarDa /f"
+                    : $@"reg add ""HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced"" /v TaskbarDa /t REG_DWORD /d {Convert.ToInt32(existing)} /f");
+                revertLines.Add("");
+
+                using var writeKey = Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced");
+                writeKey?.SetValue("TaskbarDa", 0, RegistryValueKind.DWord);
+                var was = existing == null ? "shown (default)" : (Convert.ToInt32(existing) == 0 ? "hidden" : "shown");
+                Log($"[tweaks] Taskbar widgets button: hidden (was: {was})");
+            }
+            catch (Exception ex)
+            {
+                Fail($"Taskbar widgets tweak failed: {ex.Message}");
+            }
+
+            try
+            {
+                using var readKey = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Search");
+                var existing = readKey?.GetValue("SearchboxTaskbarMode");
+
+                revertLines.Add("REM Taskbar search box");
+                revertLines.Add(existing == null
+                    ? @"reg delete ""HKCU\Software\Microsoft\Windows\CurrentVersion\Search"" /v SearchboxTaskbarMode /f"
+                    : $@"reg add ""HKCU\Software\Microsoft\Windows\CurrentVersion\Search"" /v SearchboxTaskbarMode /t REG_DWORD /d {Convert.ToInt32(existing)} /f");
+                revertLines.Add("");
+
+                using var writeKey = Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Search");
+                writeKey?.SetValue("SearchboxTaskbarMode", 0, RegistryValueKind.DWord);
+                var was = existing == null ? "shown (default)" : (Convert.ToInt32(existing) == 0 ? "hidden" : "shown");
+                Log($"[tweaks] Taskbar search box: hidden (was: {was})");
+            }
+            catch (Exception ex)
+            {
+                Fail($"Taskbar search box tweak failed: {ex.Message}");
+            }
+
+            try
+            {
+                using var readKey = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced");
+                var existing = readKey?.GetValue("ShowCopilotButton");
+
+                revertLines.Add("REM Taskbar Copilot button");
+                revertLines.Add(existing == null
+                    ? @"reg delete ""HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced"" /v ShowCopilotButton /f"
+                    : $@"reg add ""HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced"" /v ShowCopilotButton /t REG_DWORD /d {Convert.ToInt32(existing)} /f");
+                revertLines.Add("");
+
+                using var writeKey = Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced");
+                writeKey?.SetValue("ShowCopilotButton", 0, RegistryValueKind.DWord);
+                var was = existing == null ? "shown (default)" : (Convert.ToInt32(existing) == 0 ? "hidden" : "shown");
+                Log($"[tweaks] Taskbar Copilot button: hidden (was: {was})");
+            }
+            catch (Exception ex)
+            {
+                Fail($"Taskbar Copilot button tweak failed: {ex.Message}");
+            }
+
+            try
+            {
+                using var readKey = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile");
+                var existing = readKey?.GetValue("SystemResponsiveness");
+
+                revertLines.Add("REM Background task CPU reservation (MMCSS)");
+                revertLines.Add(existing == null
+                    ? @"reg delete ""HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile"" /v SystemResponsiveness /f"
+                    : $@"reg add ""HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile"" /v SystemResponsiveness /t REG_DWORD /d {Convert.ToInt32(existing)} /f");
+                revertLines.Add("");
+
+                using var writeKey = Registry.LocalMachine.CreateSubKey(@"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile");
+                writeKey?.SetValue("SystemResponsiveness", 0, RegistryValueKind.DWord);
+                var was = existing == null ? "20% (default)" : $"{Convert.ToInt32(existing)}%";
+                Log($"[tweaks] Background task CPU reservation (MMCSS): 0% (was: {was})");
+            }
+            catch (Exception ex)
+            {
+                Fail($"MMCSS tweak failed: {ex.Message}");
+            }
+
+            try
+            {
+                using var readKey = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager");
+                var existingSuggestions = readKey?.GetValue("SystemPaneSuggestionsEnabled");
+                var existingAds = readKey?.GetValue("SubscribedContent-338388Enabled");
+
+                revertLines.Add("REM Start menu suggestions/ads");
+                revertLines.Add(existingSuggestions == null
+                    ? @"reg delete ""HKCU\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager"" /v SystemPaneSuggestionsEnabled /f"
+                    : $@"reg add ""HKCU\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager"" /v SystemPaneSuggestionsEnabled /t REG_DWORD /d {Convert.ToInt32(existingSuggestions)} /f");
+                revertLines.Add(existingAds == null
+                    ? @"reg delete ""HKCU\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager"" /v SubscribedContent-338388Enabled /f"
+                    : $@"reg add ""HKCU\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager"" /v SubscribedContent-338388Enabled /t REG_DWORD /d {Convert.ToInt32(existingAds)} /f");
+                revertLines.Add("");
+
+                using var writeKey = Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager");
+                writeKey?.SetValue("SystemPaneSuggestionsEnabled", 0, RegistryValueKind.DWord);
+                writeKey?.SetValue("SubscribedContent-338388Enabled", 0, RegistryValueKind.DWord);
+                Log("[tweaks] Start menu suggestions/ads: hidden");
+            }
+            catch (Exception ex)
+            {
+                Fail($"Start menu suggestions tweak failed: {ex.Message}");
+            }
+
+            try
+            {
+                using var readKey = Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Control\Session Manager\Power");
+                var existing = readKey?.GetValue("HiberbootEnabled");
+
+                revertLines.Add("REM Fast Startup");
+                revertLines.Add(existing == null
+                    ? @"reg delete ""HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Power"" /v HiberbootEnabled /f"
+                    : $@"reg add ""HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Power"" /v HiberbootEnabled /t REG_DWORD /d {Convert.ToInt32(existing)} /f");
+                revertLines.Add("");
+
+                using var writeKey = Registry.LocalMachine.CreateSubKey(@"SYSTEM\CurrentControlSet\Control\Session Manager\Power");
+                writeKey?.SetValue("HiberbootEnabled", 0, RegistryValueKind.DWord);
+                var was = existing == null ? "on (default)" : (Convert.ToInt32(existing) == 1 ? "on" : "off");
+                Log($"[tweaks] Fast Startup: off (was: {was})");
+            }
+            catch (Exception ex)
+            {
+                Fail($"Fast Startup tweak failed: {ex.Message}");
+            }
+
+            try
+            {
+                using var readKey = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\WindowsUpdate\UX\Settings");
+                var existingStart = readKey?.GetValue("ActiveHoursStart");
+                var existingEnd = readKey?.GetValue("ActiveHoursEnd");
+
+                revertLines.Add("REM Windows Update active hours");
+                revertLines.Add(existingStart == null
+                    ? @"reg delete ""HKLM\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings"" /v ActiveHoursStart /f"
+                    : $@"reg add ""HKLM\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings"" /v ActiveHoursStart /t REG_DWORD /d {Convert.ToInt32(existingStart)} /f");
+                revertLines.Add(existingEnd == null
+                    ? @"reg delete ""HKLM\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings"" /v ActiveHoursEnd /f"
+                    : $@"reg add ""HKLM\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings"" /v ActiveHoursEnd /t REG_DWORD /d {Convert.ToInt32(existingEnd)} /f");
+                revertLines.Add("");
+
+                using var writeKey = Registry.LocalMachine.CreateSubKey(@"SOFTWARE\Microsoft\WindowsUpdate\UX\Settings");
+                writeKey?.SetValue("ActiveHoursStart", 16, RegistryValueKind.DWord);
+                writeKey?.SetValue("ActiveHoursEnd", 23, RegistryValueKind.DWord);
+                var was = existingStart == null ? "08:00-17:00 (default)" : $"{Convert.ToInt32(existingStart):D2}:00-{Convert.ToInt32(existingEnd ?? 17):D2}:00";
+                Log($"[tweaks] Windows Update active hours: 16:00-23:00 (was: {was})");
+            }
+            catch (Exception ex)
+            {
+                Fail($"Windows Update active hours tweak failed: {ex.Message}");
+            }
+
+            try
+            {
+                using var readKey = Registry.CurrentUser.OpenSubKey(@"System\GameConfigStore");
+                var existing = readKey?.GetValue("GameDVR_Enabled");
+
+                revertLines.Add("REM Xbox Game Bar / Game DVR");
+                revertLines.Add(existing == null
+                    ? @"reg delete ""HKCU\System\GameConfigStore"" /v GameDVR_Enabled /f"
+                    : $@"reg add ""HKCU\System\GameConfigStore"" /v GameDVR_Enabled /t REG_DWORD /d {Convert.ToInt32(existing)} /f");
+                revertLines.Add("");
+
+                using var writeKey = Registry.CurrentUser.CreateSubKey(@"System\GameConfigStore");
+                writeKey?.SetValue("GameDVR_Enabled", 0, RegistryValueKind.DWord);
+                var was = existing == null ? "enabled (default)" : (Convert.ToInt32(existing) == 1 ? "enabled" : "disabled");
+                Log($"[tweaks] Xbox Game Bar / Game DVR: disabled (was: {was})");
+            }
+            catch (Exception ex)
+            {
+                Fail($"Game DVR tweak failed: {ex.Message}");
+            }
+
+            try
+            {
+                var ifacePath = GetActiveNetworkInterfaceRegistryPath();
+                if (ifacePath == null)
+                {
+                    revertLines.Add("REM Network latency (Nagle's algorithm) - no active adapter found, nothing changed");
+                    revertLines.Add("");
+                    Log("[tweaks] Network latency (Nagle's algorithm): skipped - no active network adapter found");
+                }
+                else
+                {
+                    using var readKey = Registry.LocalMachine.OpenSubKey(ifacePath);
+                    var existingAck = readKey?.GetValue("TcpAckFrequency");
+                    var existingNoDelay = readKey?.GetValue("TCPNoDelay");
+
+                    revertLines.Add("REM Network latency (Nagle's algorithm)");
+                    revertLines.Add(existingAck == null
+                        ? $@"reg delete ""HKLM\{ifacePath}"" /v TcpAckFrequency /f"
+                        : $@"reg add ""HKLM\{ifacePath}"" /v TcpAckFrequency /t REG_DWORD /d {Convert.ToInt32(existingAck)} /f");
+                    revertLines.Add(existingNoDelay == null
+                        ? $@"reg delete ""HKLM\{ifacePath}"" /v TCPNoDelay /f"
+                        : $@"reg add ""HKLM\{ifacePath}"" /v TCPNoDelay /t REG_DWORD /d {Convert.ToInt32(existingNoDelay)} /f");
+                    revertLines.Add("");
+
+                    using var writeKey = Registry.LocalMachine.CreateSubKey(ifacePath);
+                    writeKey?.SetValue("TcpAckFrequency", 1, RegistryValueKind.DWord);
+                    writeKey?.SetValue("TCPNoDelay", 1, RegistryValueKind.DWord);
+                    Log("[tweaks] Network latency (Nagle's algorithm): disabled (was: not set/enabled)");
+                }
+            }
+            catch (Exception ex)
+            {
+                Fail($"Network latency tweak failed: {ex.Message}");
             }
 
             try

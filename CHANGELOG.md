@@ -11,6 +11,103 @@ Everything below `0.6.2` predates versioning entirely, so those entries are
 backfilled from the original milestone-based changelog and given version
 numbers retroactively - there's no real date for them, only relative order.
 
+## [0.19.0] - Active hours, Game DVR, Nagle's algorithm, and read-only TRIM/health reporting
+
+### Added
+- Three more items on the `ConfirmTweaks` screen, same disclosed/reversible
+  pattern as everything else there:
+  - **Windows Update active hours** - `ActiveHoursStart`/`ActiveHoursEnd`
+    (`HKLM\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings`) set to a
+    16:00-23:00 window, rather than disabling updates.
+  - **Xbox Game Bar / Game DVR** - `GameDVR_Enabled`
+    (`HKCU\System\GameConfigStore`) disabled, for capture software that
+    conflicts with it.
+  - **Network latency (Nagle's algorithm)** - `TcpAckFrequency` and
+    `TCPNoDelay` set on whichever network interface is actually active
+    right now (found via WMI - `Tcpip\Parameters\Interfaces\{GUID}` is
+    per-adapter, not global). Falls back to a clear "no active network
+    adapter found" preview line rather than guessing if none can be
+    identified.
+- **Read-only storage health + TRIM reporting** on the fake BIOS screen,
+  next to the existing disk list - no consent screen, since nothing
+  changes:
+  - Each disk's line now shows its real WMI `Status` (normally "OK") in
+    place of the previously-hardcoded "OK".
+  - A new "TRIM (delete notify): enabled/disabled" line, read via
+    `fsutil behavior query DisableDeleteNotify` (the standard, documented
+    way to check this - there's no WMI class for it).
+
+### Notes
+- The DNS-switch half of the original "Network/QoS tweak" roadmap idea
+  is deliberately not included here - it needs its own provider-choice
+  screen and carries more risk than a registry flag (VPNs, parental
+  controls, ISP-specific services can all depend on the existing DNS).
+  Left on `ROADMAP.md` as its own future idea rather than bundled in.
+- The debloat pass is intentionally not part of this release either - a
+  different shape of feature (removing pre-installed apps, not changing a
+  setting), worth designing on its own.
+
+## [0.18.0] - MMCSS, Start menu ads, Fast Startup, and an Ultimate Performance choice
+
+### Added
+- Three more items on the `ConfirmTweaks` screen, same disclosed/reversible
+  pattern as everything else there:
+  - **Background task CPU reservation (MMCSS)** - `SystemResponsiveness`
+    (`HKLM\...\Multimedia\SystemProfile`) from its 20% default down to 0%,
+    so background/low-priority tasks stop reserving CPU away from the
+    foreground game. This is Microsoft's own documented MMCSS tuning
+    value, not an undocumented hack.
+  - **Start menu suggestions/ads** - `SystemPaneSuggestionsEnabled` and
+    `SubscribedContent-338388Enabled` (both `HKCU\...\ContentDeliveryManager`)
+    off, turning off the suggested-apps/tips content Windows injects into
+    Start.
+  - **Fast Startup** - `HiberbootEnabled`
+    (`HKLM\SYSTEM\...\Session Manager\Power`) off - the same effect as
+    unchecking "Turn on fast startup" in Control Panel's Power Options.
+- A new **"ChoosePowerPlan"** screen, shown once right before `ConfirmTweaks`:
+  `[1] High performance` or `[2] Ultimate Performance`. Ultimate Performance
+  is a real, Microsoft-documented hidden power plan
+  (template GUID `e9a42b02-d5df-448d-aa00-03f14749eb61`) that isn't
+  activatable directly on modern Windows - it has to be duplicated into a
+  real, visible plan first via `powercfg -duplicatescheme`, which
+  `InstallerEngine` now does (reusing an existing duplicate on a repeat run
+  rather than creating a new one every time). The "Power plan" tweak row on
+  `ConfirmTweaks` now reflects whichever one was chosen.
+
+### Notes
+- The Start menu tweak and MMCSS/Fast Startup changes all apply as
+  documented registry values with existing precedent in this project
+  (`HKCU` for per-user settings, `HKLM` for machine-wide ones) - same
+  revert-script coverage as every tweak before them.
+
+## [0.17.0] - Explorer + taskbar tweaks
+
+### Added
+- Six new items on the `ConfirmTweaks` screen, same disclosed/reversible
+  pattern as the existing Game Mode/HAGS/power plan tweaks - real current
+  value shown, nothing changes without saying yes, everything captured in
+  `revert-tweaks.cmd`:
+  - **File extensions** - shown instead of hidden in Explorer.
+  - **Hidden files** - shown instead of hidden.
+  - **Right-click context menu** - restored to the classic (pre-Windows 11)
+    full menu instead of needing "Show more options", via the documented
+    `{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}` CLSID override. Reverting
+    deletes that key outright rather than restoring a previous value,
+    since the key either exists or it doesn't.
+  - **Taskbar widgets button** - hidden.
+  - **Taskbar search box** - hidden.
+  - **Taskbar Copilot button** - hidden.
+- All six are per-user (`HKCU`) settings, unlike the existing three tweaks
+  which are machine-wide (`HKLM`) - `Registry.CurrentUser` resolves
+  correctly even though the app runs elevated, since HKCU is tied to the
+  signed-in user's SID, not to the process's elevation token.
+
+### Notes
+- The context-menu and taskbar changes take effect after Explorer restarts
+  (usually the next sign-in) rather than instantly - noted on the log line
+  for the context-menu tweak so it isn't mistaken for a failure if the
+  right-click menu doesn't change immediately.
+
 ## [0.16.0] - Microsoft PC Manager added to the catalog
 
 ### Added

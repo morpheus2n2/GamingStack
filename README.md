@@ -6,7 +6,7 @@
 ![Platform](https://img.shields.io/badge/platform-Windows-blue)
 ![.NET](https://img.shields.io/badge/.NET-8.0-purple)
 ![Status](https://img.shields.io/badge/status-WIP-orange)
-[![Version](https://img.shields.io/badge/version-0.16.0-brightgreen.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.19.0-brightgreen.svg)](CHANGELOG.md)
 
 A fully automated, over-the-top retro-styled Windows 11 gaming setup app.
 Boots through a fake BIOS screen (pulling your *real* motherboard/CPU/RAM/
@@ -26,7 +26,8 @@ to put it back.
 ## Features
 
 - **Fake BIOS POST screen** — genuinely reads your motherboard, CPU, RAM,
-  GPU and disks and displays them like a real boot screen, including an
+  GPU and disks (including each disk's real health status and whether
+  TRIM is enabled) and displays them like a real boot screen, including an
   animated memory count-up with tick beeps
 - **Original retro boot animation** — gradient sky, a hand-pixelled sun,
   a rolling-hills silhouette, drifting pixel clouds, and a waving flag that
@@ -49,12 +50,18 @@ to put it back.
   needed for this one. On top of that, an **optional full disk-image
   backup** (before any changes, or after everything's set up, your call)
   — see [Restore point & backup](#restore-point--backup) below
-- **Optional gaming tweaks (Game Mode, hardware-accelerated GPU scheduling,
-  High Performance power plan)** — asked about explicitly, never applied
-  silently: a dedicated screen shows each one's real current value and
-  what it would change to, before anything happens. Saying yes writes a
+- **Optional tweaks** — Game Mode, hardware-accelerated GPU scheduling, a
+  choice between the High Performance or hidden Ultimate Performance power
+  plan, Explorer/taskbar decluttering (file extensions, hidden files, the
+  classic right-click menu, hiding the widgets/search/Copilot buttons),
+  background-task CPU reservation (MMCSS), Start menu suggestions/ads,
+  Fast Startup, Windows Update active hours, Xbox Game Bar/Game DVR, and
+  network latency (Nagle's algorithm) — asked about explicitly, never
+  applied silently: a
+  dedicated screen shows each one's real current value and what it would
+  change to, before anything happens. Saying yes writes a
   `revert-tweaks.cmd` first, which restores every setting to exactly what
-  it was — see [Gaming tweaks](#gaming-tweaks) below
+  it was — see [Tweaks](#tweaks) below
 - **Install summary** at the end of a run — totals plus a per-item
   installed/failed/skipped breakdown, grouped by category, with a
   plain-English reason next to anything that failed or was skipped (known
@@ -93,9 +100,9 @@ of what's on offer and asks:
 Once a real app selection is finalized (everything, or a hand-picked
 subset — even an empty one), a System Restore point is created, an
 optional full disk-image backup is offered, and then a screen asks about
-the gaming tweaks — in that order, before installing anything. See
+the tweaks — in that order, before installing anything. See
 [Restore point & backup](#restore-point--backup) and
-[Gaming tweaks](#gaming-tweaks) below.
+[Tweaks](#tweaks) below.
 
 After a real install run, the summary screen leads into a fake shutdown
 sequence before the sign-off screen — press any key to move past the
@@ -137,20 +144,62 @@ turn off your PC" screen and an elapsed timer while it runs. The summary
 screen reports what actually happened to both the restore point and the
 backup, including the backup's own log file.
 
-## Gaming tweaks
+## Tweaks
 
-Once app selection is finalized, a dedicated screen lists the tweaks
-GamingStack can apply — Game Mode, hardware-accelerated GPU scheduling,
-and the High Performance power plan — each with its real current value
-(read live, not assumed) and what it would become:
+Right before the tweaks screen, one small question decides what the power
+plan tweak targets:
 
 ```
-Game Mode                            currently: not set (Windows default)  ->  enabled
-Hardware-accelerated GPU scheduling  currently: off                        ->  on
-Power plan                           currently: Balanced                  ->  High performance
+[1] High performance - Windows' own built-in plan (recommended)
+[2] Ultimate Performance - a hidden Microsoft plan with the last few
+    power-saving throttles removed on top of High performance
+
+Choose 1 or 2
+```
+
+Ultimate Performance is real and Microsoft-documented, just hidden by
+default since it has no benefit on a laptop and a small idle-power cost on
+a desktop that's plugged in. Picking it duplicates the hidden template
+into a real, switchable plan the first time (reusing that same duplicate
+on any later run, rather than creating a new one every time).
+
+Then a dedicated screen lists every tweak GamingStack can apply — the
+gaming tweaks (Game Mode, hardware-accelerated GPU scheduling, the power
+plan you just chose), a set of Explorer/taskbar decluttering tweaks (file
+extensions, hidden files, the classic right-click context menu, and hiding
+the taskbar's widgets/search/Copilot buttons), and a handful more (
+background-task CPU reservation, Start menu suggestions/ads, Fast
+Startup, Windows Update active hours, Xbox Game Bar/Game DVR, and network
+latency) — each with its real current value (read live, not assumed) and
+what it would become:
+
+```
+Game Mode                                   currently: not set (Windows default)  ->  enabled
+Hardware-accelerated GPU scheduling         currently: off                        ->  on
+Power plan                                  currently: Balanced                   ->  High performance
+File extensions                             currently: hidden (Windows default)   ->  shown
+Hidden files                                currently: hidden (Windows default)   ->  shown
+Right-click context menu                    currently: modern (Windows 11 default) -> classic (full menu, no "Show more options")
+Taskbar widgets button                      currently: shown (Windows default)    ->  hidden
+Taskbar search box                          currently: shown (Windows default)    ->  hidden
+Taskbar Copilot button                      currently: shown (Windows default)    ->  hidden
+Background task CPU reservation (MMCSS)     currently: 20% (Windows default)      ->  0% (games get full priority)
+Start menu suggestions/ads                  currently: shown (Windows default)    ->  hidden
+Fast Startup                                currently: on (Windows default)       ->  off
+Windows Update active hours                 currently: 08:00-17:00 (Windows default) -> 16:00-23:00 (typical evening gaming window)
+Xbox Game Bar / Game DVR                    currently: enabled (Windows default)  ->  disabled
+Network latency (Nagle's algorithm)         currently: not set (Windows default, Nagle's algorithm enabled) -> disabled
 
 Apply these tweaks?   [Y] Yes    [N] No, skip tweaks
 ```
+
+The Explorer/taskbar tweaks are per-user settings, so they take effect
+next time Explorer restarts (typically your next sign-in) rather than
+instantly — that's expected, not a failure. The Nagle's algorithm tweak
+targets whichever network interface is actually active right now (found
+via WMI, since this is a per-adapter setting, not a global one) — if none
+can be identified, that row shows "no active network adapter found" and
+is skipped rather than guessed at.
 
 `N` skips every tweak — nothing is touched. `Y` applies them, but not
 before writing `revert-tweaks.cmd` next to the install log: a plain,
@@ -266,8 +315,13 @@ registry settings on your machine. Test it in a VM or a spare machine
 before running it on anything you care about, and review the app list in
 `InstallerEngine.cs` before running it on your own PC. Every system-level
 tweak it applies (today: Game Mode, hardware-accelerated GPU scheduling,
-the power plan) is a standard, documented Windows setting — nothing here
-is a hidden or one-way change, and that stays true for anything added from
+the power plan - including the hidden Ultimate Performance plan, if you
+pick it - file extensions/hidden files, the classic right-click context
+menu, the taskbar widgets/search/Copilot buttons, MMCSS background-task
+CPU reservation, Start menu suggestions/ads, Fast Startup, Windows Update
+active hours, Xbox Game Bar/Game DVR, and Nagle's algorithm) is a
+standard, documented Windows setting — nothing here is a hidden or one-way
+change, and that stays true for anything added from
 [`ROADMAP.md`](ROADMAP.md) going forward.
 
 ## Credits & copyright

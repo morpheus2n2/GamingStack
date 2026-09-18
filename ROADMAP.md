@@ -41,24 +41,51 @@ that same pattern - it's the template, not just the rule.
   disk-image backup (before changes or after setup, auto-detected
   destination drive, blocks until done) for the times a restore point
   alone isn't enough. See `CHANGELOG.md`'s 0.15.0 entry.
-- **Explorer tweaks** - show file extensions, show hidden files, restore
-  the classic (non-condensed) right-click context menu.
-- **Taskbar/Start decluttering** - hide widgets, hide the search box,
-  disable the Copilot button. Purely cosmetic Windows settings, all
-  one-click to put back.
+- ~~Explorer tweaks~~ - **done in 0.17.0**: show file extensions, show
+  hidden files, restore the classic (non-condensed) right-click context
+  menu. See `CHANGELOG.md`'s 0.17.0 entry.
+- ~~Taskbar/Start decluttering~~ - **done in 0.17.0**: hide widgets, hide
+  the search box, disable the Copilot button. Purely cosmetic Windows
+  settings, all one-click to put back. See `CHANGELOG.md`'s 0.17.0 entry.
+- ~~Ultimate Performance power plan~~ - **done in 0.18.0**: offered as an
+  alternative to High Performance at the power-plan tweak step, via a
+  small "[1] High performance [2] Ultimate Performance" choice right
+  before the tweaks screen. See `CHANGELOG.md`'s 0.18.0 entry.
+- ~~MMCSS background-task CPU reservation~~ - **done in 0.18.0**: the
+  `SystemResponsiveness` value that reserves CPU for background tasks,
+  set to 0 so games get full priority. See `CHANGELOG.md`'s 0.18.0 entry.
+- ~~Start menu suggestions/ads~~ - **done in 0.18.0**: turns off the
+  suggested-apps/tips content Windows injects into Start. See
+  `CHANGELOG.md`'s 0.18.0 entry.
+- ~~Fast Startup toggle~~ - **done in 0.18.0**: the same effect as
+  unchecking "Turn on fast startup" in Control Panel's Power Options. See
+  `CHANGELOG.md`'s 0.18.0 entry.
 - **Debloat pass, opt-in per item** - trial Office nag, preinstalled OEM
   trialware, unwanted Xbox Game Bar overlay, etc. Never a blanket "remove
-  everything" - each one listed and individually skippable.
-- **Network/QoS tweak for gaming** - e.g. disabling Nagle's algorithm on
-  the NIC, or offering a DNS switch (Cloudflare/Google). Show the old
-  value, offer a one-click revert.
-- **Windows Update active hours** - configure the official "active hours"
-  setting around typical gaming times, rather than actually disabling
-  updates.
-- **NVMe TRIM / storage health check** - read-only reporting, no tweak
-  involved, fits next to the existing CrystalDiskInfo install.
-- **Xbox Game Bar / Game DVR toggle** - some capture software conflicts
-  with it; offer to turn it off, with the on/off state shown clearly.
+  everything" - each one listed and individually skippable. Deliberately
+  not bundled in with the tweaks in 0.19.0 - this is a different shape of
+  feature (removing pre-installed apps, not changing a setting) and needs
+  its own opt-in-per-item list UI and app-detection logic, worth designing
+  on its own rather than squeezed into the existing tweaks pattern.
+- ~~Windows Update active hours~~ - **done in 0.19.0**: sets the official
+  "active hours" window to 16:00-23:00 (typical evening gaming times),
+  rather than disabling updates. See `CHANGELOG.md`'s 0.19.0 entry.
+- ~~NVMe TRIM / storage health check~~ - **done in 0.19.0**: read-only
+  reporting on the fake BIOS screen next to the disk list - real per-disk
+  WMI health status, and a TRIM (delete notify) status line. See
+  `CHANGELOG.md`'s 0.19.0 entry.
+- ~~Xbox Game Bar / Game DVR toggle~~ - **done in 0.19.0**: some capture
+  software conflicts with it; a clear on/off tweak on the `ConfirmTweaks`
+  screen. See `CHANGELOG.md`'s 0.19.0 entry.
+- ~~Network/QoS tweak for gaming (Nagle's algorithm half)~~ - **done in
+  0.19.0**: disables Nagle's algorithm on whichever network interface is
+  actually active. See `CHANGELOG.md`'s 0.19.0 entry.
+- **DNS switch (Cloudflare/Google)** - the other half of the original
+  "Network/QoS tweak" idea, deliberately split off rather than bundled
+  into 0.19.0. Needs its own provider-choice screen, and carries more
+  risk than a registry flag - a VPN, parental controls, or an
+  ISP-specific service can all depend on the DNS servers already in use,
+  so this deserves its own careful design pass rather than a quick add.
 
 ## Apps to add to the catalog
 

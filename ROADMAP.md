@@ -67,6 +67,45 @@ that same pattern - it's the template, not just the rule.
   feature (removing pre-installed apps, not changing a setting) and needs
   its own opt-in-per-item list UI and app-detection logic, worth designing
   on its own rather than squeezed into the existing tweaks pattern.
+  Concrete starting list of what to target, found while reviewing
+  [theantipopau/windows11nontouchgamingoptimizer](https://github.com/theantipopau/windows11nontouchgamingoptimizer)
+  (MIT-licensed - fine to reuse the *idea* of which packages, though this
+  project's own tweaks are always reimplemented natively in C#, never
+  shelled out to someone else's script): Bing News/Weather, Clipchamp,
+  Skype, Teams, TikTok, Spotify, Disney+ and similar preinstalled consumer
+  apps.
+- **Mouse acceleration disable** - the classic "Enhance pointer precision"
+  off tweak (`MouseSpeed`/`MouseThreshold1`/`MouseThreshold2` under
+  `HKCU\Control Panel\Mouse`, all set to 0). Very standard among FPS
+  players, one clean per-user registry change, trivially reversible -
+  fits the `ConfirmTweaks` pattern directly.
+- **CPU core parking disabled** - a real, documented power-plan setting
+  (`ValueMin`/`ValueMax` on the core-parking min-cores-parked GUID,
+  `0cc5b647-c1df-4637-891a-dec35c318583`, under the active power scheme)
+  that stops Windows idling CPU cores. Same spirit as the existing
+  power-plan tweaks, just a `powercfg -setacvalueindex`/
+  `-setdcvalueindex` pair instead of a plain registry write.
+- **Win32PrioritySeparation** - boosts foreground-app CPU scheduling
+  priority (`HKLM\SYSTEM\CurrentControlSet\Control\PriorityControl`,
+  value `Win32PrioritySeparation`). Single documented DWORD, same
+  disclosed/reversible shape as everything else here.
+- **Delivery Optimization disabled** - stops Windows using this PC's
+  bandwidth to share Windows Update downloads P2P with other PCs on the
+  internet (`HKLM\SOFTWARE\Policies\Microsoft\Windows\DeliveryOptimization`,
+  value `DODownloadMode` set to 0). Clean, reversible, no real downside
+  for a gaming rig.
+- **Disable DiagTrack (Connected User Experiences and Telemetry)** - a
+  service toggle rather than a registry flag (still reversible - the
+  service's start-type just goes back to what it was), standard in most
+  gaming/privacy tweak guides.
+- Deliberately **not** taking from that same repo: disabling
+  SysMain/Superfetch (helps HDDs, can be neutral-to-negative on an SSD
+  with plenty of RAM - not a clean universal win), setting Windows Search
+  to manual (a real cost to Start menu search speed, not a freebie),
+  raising `MaxUserPort` or disabling 8.3 filenames (marginal value for a
+  single gaming PC, more relevant to servers), and its "intelligent" page
+  file/memory compression changes (riskier to get wrong than the benefit
+  justifies - Microsoft's own defaults are usually fine here).
 - ~~Windows Update active hours~~ - **done in 0.19.0**: sets the official
   "active hours" window to 16:00-23:00 (typical evening gaming times),
   rather than disabling updates. See `CHANGELOG.md`'s 0.19.0 entry.
@@ -129,6 +168,37 @@ that same pattern - it's the template, not just the rule.
   until it's confirmed exactly what tool is meant - if the user meant a
   specific different product, worth asking for a link next time it comes
   up.
+
+## Retro computing / emulation
+
+- **Windows 98 gaming VM, pre-configured but not pre-installed** - install
+  [86Box](https://86box.net) (winget package `86Box.86Box`), the
+  cycle-accurate PC emulator the retro-gaming community actually uses for
+  this, rather than a generic hypervisor like VirtualBox/VMware - those
+  don't emulate the period chipsets, Sound Blaster/AdLib audio, or 3dfx
+  Voodoo-era graphics that Windows 98 games actually expect, so games
+  either won't install or won't run right. GamingStack would install
+  86Box and drop in a pre-built virtual machine config (86Box's own JSON
+  format) tuned as a period-accurate late-90s gaming rig - a
+  Pentium/AMD-era CPU, a Voodoo3 or similar, an SB16 - so it boots straight
+  to a BIOS screen ready for an OS.
+  - **The one thing this can't do**: install Windows 98 itself. It isn't
+    freeware or redistributable - Microsoft's copyright on it hasn't
+    lapsed just because it's unsupported, so GamingStack can't bundle,
+    download, or auto-fetch an ISO or product key on your behalf. The
+    feature has to stop at "here's the emulator, pre-configured and
+    pointed at an empty virtual CD drive" with a short readme on where to
+    mount your own legally-owned Windows 98 disc/ISO and enter your own
+    key - the same way any legitimate retro-gaming guide handles this.
+  - Fits the disclosed/reversible rule cleanly: installing 86Box and a
+    config file is no different from installing any other catalog app,
+    and removing it is just deleting the VM folder - nothing touches the
+    host system's registry or settings at all.
+  - Worth scoping as its own small feature when picked up: what hardware
+    profile to ship as the default (a Voodoo3 + SB16 covers most late-90s
+    3D titles), where the VM files live, and how much of the 86Box
+    config screen to explain in the readme versus just linking to
+    86Box's own docs.
 
 ## Automation / quality of life
 

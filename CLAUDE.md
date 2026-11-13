@@ -12,7 +12,8 @@ maximum nostalgia.
 The project uses [Semantic Versioning](https://semver.org/), tracked in
 `GamingStackGUI.csproj` (`<Version>`/`<AssemblyVersion>`/`<FileVersion>`)
 and mirrored as a `## [x.y.z] - ...` heading at the top of `CHANGELOG.md`.
-While still under `0.y.z` (nothing's been publicly released):
+The project is at **1.6.0**. Rules for bumping (they were written under
+`0.y.z` and still apply the same way):
 - **Bump the minor version** (`0.6.x` → `0.7.0`) for a change that adds a
   feature - a new wizard behavior, a new catalog category, a new stage.
 - **Bump the patch version** (`0.6.1` → `0.6.2`) for a fix, tweak, or pure
@@ -52,7 +53,7 @@ publish. Everything lives in one process:
   all one canvas that changes what it draws based on `_stage`.
 - `App.manifest` - requests admin elevation via `requireAdministrator`
   (no relaunch-and-exit trick needed, unlike the old PS1 version).
-- `Resources/win95.wav` and `Resources/wallpaper.jpg` - both embedded
+- `BootScene.cs` (boot artwork + gradient loading bar), `BiosLogo.cs` (BIOS emblem), `BootTheme.cs` (time-of-day colour schemes), `DesktopIcons.cs`, `PixelCanvas.cs` (shared pixel helpers + 5x7 font) and `RetroAudio.cs` (sound mixer for the typewriter and BIOS beeps: winmm, synthesised, own thread) are separate files by design. `Resources/win95.wav` - embedded as is (`Resources/wallpaper.jpg` too)
   resources, located at runtime by name match
   (`GetManifestResourceNames().FirstOrDefault(n => n.EndsWith(...))`)
   rather than a hardcoded resource path, specifically to avoid the exact
@@ -87,7 +88,7 @@ publish. Everything lives in one process:
 ## Stage flow (`MainForm.cs`)
 
 ```
-Bios -> Boot -> Desktop -> Terminal
+Bios -> Boot -> Desktop -> Terminal (ChooseProfile first); SPACE skips Bios/Boot/Desktop straight to Terminal
   \-> Bsod -> Boot   (if Delete is pressed during Bios)
 ```
 
@@ -101,19 +102,24 @@ Bios -> Boot -> Desktop -> Terminal
 - **Bsod**: easter egg. Pressing Delete during Bios jumps here for 7s
   (joke text), then continues into Boot as if nothing happened. Doesn't
   resume Bios - it skips straight to Boot.
-- **Boot**: original artwork only - gradient sky, drifting pixel clouds,
-  a waving flag built from animated vertical strips (sine-wave flutter).
-  **Do not source or embed real Windows 95/98 boot GIFs/logos here** - see
-  Copyright below. Win95 startup sound fires at the 8s mark via a
-  stopwatch check (not a fixed `Sleep`), so it survives frame-rate hiccups.
-- **Desktop**: placeholder wallpaper (clearly labeled as a placeholder -
-  the user will drop in a real image later), two icons with original glyph
-  art (drive/folder shapes, not copied Windows icons), taskbar with a live
+- **Boot**: original artwork only, drawn procedurally by `BootScene.cs` in a
+  16/32-bit style (dithered sky, striped sun, parallax mountains/hills,
+  shaded clouds, waving flag with pixel lettering) at low resolution and
+  scaled up by a whole number so pixels stay square. No image files - the old
+  sprite PNGs are gone.
+- **Desktop**: the embedded `Resources/wallpaper.jpg` (the user's own choice; it shows some real brand marks, worth remembering if this is ever released publicly), scaled once at load and lightly sharpened. Three pixel-art setup-type icons (`DesktopIcons.cs`, original art, not copied Windows icons), a Start button with a chip logo, and a taskbar with a live
   clock. Holds 7s.
 - **Terminal**: a command-prompt-style window that scales in from the
   center (ease-out cubic), then runs an interactive install wizard
   (`WizardPhase` enum in `MainForm.cs`) before ever touching
   `InstallerEngine`:
+  - `ChooseProfile` is the first screen: [1] Gaming/Streaming, [2] Office,
+    [3] Developer/Home lab (`SetupProfile`, `SelectProfile`). Each
+    `AppEntry` has a `Profiles` flag (default Gaming only) and the wizard uses
+    `InstallerEngine.CatalogFor(profile)` (`_catalog` in `MainForm`). Gaming-only
+    tweaks are gated in `PreviewTweaks`/`ApplyTweaks` by `options.Profile`;
+    Developer adds long paths + Developer Mode, both with preview and undo line.
+    Any new tweak must still follow preview -> consent -> apply -> revert.
   - `ConfirmAll` shows the full `InstallerEngine.Catalog` (friendly
     names, grouped under a heading per `Category` - see
     `BuildWizardColumnsIfNeeded`/`DrawWizard`) and asks Y/N to install
@@ -154,6 +160,57 @@ Bios -> Boot -> Desktop -> Terminal
     it's the same message either way, per the user's explicit request.
   - Y/N keys only do anything while `_stage == Stage.Terminal`, routed
     through `HandleWizardKey` from `OnKeyDown`.
+
+## The desktop shell (1.3.0) - read before touching windows/icons
+
+After the boot screen the app is a small retro "OS", still all on the one canvas (no real
+child forms - that rule stands). `MainForm` is now a `partial` class split by concern:
+`MainForm.cs` (stages, BIOS, wizard, installer drawing), `MainForm.Shell.cs` (window
+manager: z-order, title bar + minimise/maximise/close, drag/resize, taskbar buttons, Start
+menu, desktop icons, input routing) and `MainForm.Apps.cs` (the installer window, My
+Computer, Trophy Room, Arcade/Snake, Recycle Bin). `RetroWindow` is just data + callbacks;
+the shell draws the chrome and calls `DrawClient`/`OnKey`/`OnTick`.
+- The installer is the window with Id `installer`; `Stage.Terminal` still means "installer
+  has been launched" and the wizard logic is unchanged. `EnterTerminalStage()` is the one
+  way in. Icons/Start menu call it; the desktop auto-opens it after a few seconds unless
+  another window is open.
+- To add an app: add an icon in `DesktopIcons.cs`, an entry in `IconItems()` (and
+  `StartItems()` if wanted) and an `OpenXxx()` that calls `OpenWindow(new RetroWindow {...})`.
+- `ProgressStore` is the only thing written between runs (`%APPDATA%\GamingStack\progress.json`).
+  It must stay app-data only - never put system settings in it.
+
+- **UI scale rule:** all shell/app code works in *virtual* pixels (`VW`/`VH`, never
+  `Width`/`Height`) because the shell is drawn through `g.ScaleTransform(UiScale)`; mouse points
+  go through `V()`. The wallpaper, boot scene and scanlines are drawn at real pixel size.
+- `MainForm.Tools.cs` holds the screensaver, Display Properties, Arcade picker, Notes, Paint,
+  Defrag and Command Prompt; `MiniGames.cs` holds Minesweeper/Pong/Breakout (Snake is its own
+  file). Settings and scores live in `ProgressStore` (app data only).
+
+- **Fonts rule:** never `new Font("Consolas", ...)` - use `Ui.Font(points, style)` (pixel-sized), or text and
+  layout drift apart on scaled displays. UI scale defaults to 1x (`UiScale`); choices live in Display Properties.
+- Desktop icons sit on a slot grid (`Slots()`), draggable, saved via `ProgressStore.IconSlots`.
+
+## Logging, consent and downloads (1.6.0) - read before touching the install flow
+
+- Flow in the wizard is now `... -> ConfirmTweaks -> FinalReview -> Installing`. **FinalReview**
+  (`DrawFinalReview` in `MainForm.Wizard.cs`) must stay: it needs `GO` + Enter typed, it lists every
+  consequence in plain words, and `N` backs out with nothing changed. Don't turn it into a single
+  keypress and don't add a way to reach `StartInstall()` that skips it.
+- `InstallerEngine.RunAsync` writes a timestamped log to `Documents\GamingStack\logs` (header with
+  version/OS/admin/profile/backup/tweak options/every item, then each step with result and
+  duration, then a summary). New install steps must call `Log(...)`; failures go through `Fail(...)`.
+  Manual downloads are fingerprinted (size, SHA-256, signer) before they are run.
+- Undo scripts are per run in `Documents\GamingStack\undo\` (never overwritten - a second run would
+  otherwise record already-changed values). Don't move them back to Temp.
+- `RequestCancel()` (key `C` while installing) stops after the current item and skips tweaks and
+  removals that haven't started.
+- `AppKind.Link` entries just open an https `PageUrl` in the default browser (no download, no
+  bundled browser); `Manual` entries fall back to their `PageUrl` if the automatic install fails.
+  Results use `InstallResultKind.Opened`.
+- `MainForm` is split by topic: `MainForm.cs` (state, ctor, stage loop, keys), `.Intro.cs` (BIOS,
+  boot, wallpaper), `.Wizard.cs` (flow + every wizard screen), `.Finale.cs` (summary and ending),
+  `.Achievements.cs`, `.Shell.cs`, `.Apps.cs`, `.Tools.cs`.
+- `tools/gen-catalog.py` regenerates `docs/CATALOG.md` from the catalog - run it when apps change.
 
 ## Copyright constraint - important
 
@@ -213,7 +270,13 @@ assume either one succeeded just because it was attempted.
 
 The original build order (installer stack, wizard, summary, shutdown
 outro, achievement toasts, Konami code, real boot animation art) is
-complete as of 0.13.2 - see `CHANGELOG.md` for the full history.
+complete as of 0.13.2, and the project reached 1.0.0 (optional DNS switch,
+opt-in debloat, `BuildSheet.cs` plain-text build sheet saved to
+`Documents\GamingStack`, Credits screen after Summary) - see `CHANGELOG.md`
+for the full history. 1.0.0 compiles, but the debloat uninstall, the Store
+reinstall IDs in the undo script, the DNS switch, and the Credits/Build
+Sheet screens have never been run on a real PC. The DNS switch and debloat
+follow the same disclosed + reversible rule as every other tweak.
 
 Everything under consideration beyond that lives in `ROADMAP.md`, grouped
 by kind (system tweaks, apps, automation, fun/easter eggs). The one rule

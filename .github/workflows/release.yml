@@ -1,55 +1,86 @@
 name: Build and release
 
-# Push a tag like v1.0.0 to build the self-contained .exe on a real Windows
-# runner and attach it to a GitHub Release - that's the whole point of this:
-# nobody (including you) needs VS Code or the .NET SDK installed just to get
-# the exe. workflow_dispatch lets you trigger a test build by hand without
-# tagging anything, useful while you're still iterating before v1.0.0.
+# Push a tag like v1.6.0 to build the self-contained .exe on a real Windows runner and attach it
+# (plus its SHA-256) to a GitHub Release - nobody needs VS Code or the .NET SDK installed just to
+# get the exe. workflow_dispatch lets you trigger a test build by hand without tagging anything.
+#
+# Optional: add a repository secret called VT_API_KEY (a free VirusTotal API key) and every tagged
+# release is also scanned with VirusTotal, with the report links written into the release notes.
 on:
   push:
     tags:
       - "v*.*.*"
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: windows-latest
+    env:
+      VT_API_KEY: ${{ secrets.VT_API_KEY }}
     steps:
       - name: Check out repo
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
 
       - name: Set up .NET 8
-        uses: actions/setup-dotnet@v6
+        uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "8.0.x"
+
+      # Fail the build on any compile warning/error so releases stay clean.
+      - name: Build (must be warning-free)
+        run: dotnet build GamingStackGUI.csproj -c Release -warnaserror
 
       # -r/-p flags already match what's in GamingStackGUI.csproj
       # (SelfContained/PublishSingleFile/etc.) - this just triggers it on CI.
       - name: Publish self-contained exe
         run: dotnet publish GamingStackGUI.csproj -c Release -r win-x64
 
-      - name: Locate published exe
+      - name: Locate published exe and hash it
         id: locate
         shell: pwsh
         run: |
-          $exe = Get-ChildItem -Recurse -Filter "GamingStackGUI.exe" -Path "bin/Release" | Select-Object -First 1
+          $exe = Get-ChildItem -Recurse -Filter "GamingStackGUI.exe" -Path "bin/Release" | Where-Object { $_.FullName -match "publish" } | Select-Object -First 1
           if (-not $exe) { throw "Published exe not found - did the publish step fail?" }
+          $hash = (Get-FileHash $exe.FullName -Algorithm SHA256).Hash.ToLower()
+          "$hash *GamingStackGUI.exe" | Out-File -Encoding ascii "$($exe.DirectoryName)/GamingStackGUI.exe.sha256"
           "exePath=$($exe.FullName)" >> $env:GITHUB_OUTPUT
+          "shaPath=$($exe.DirectoryName)/GamingStackGUI.exe.sha256" >> $env:GITHUB_OUTPUT
+          "sha=$hash" >> $env:GITHUB_OUTPUT
+          Write-Output "SHA-256: $hash"
 
-      # Always uploaded as a workflow artifact (visible on every run, tag or
-      # not) so a manual workflow_dispatch run gives you something to
-      # download and test before you commit to tagging a real release.
+      # Always uploaded as a workflow artifact (visible on every run, tag or not) so a manual
+      # workflow_dispatch run gives you something to download and test before tagging a release.
       - name: Upload build artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: GamingStack-${{ github.ref_name }}
-          path: ${{ steps.locate.outputs.exePath }}
+          path: |
+            ${{ steps.locate.outputs.exePath }}
+            ${{ steps.locate.outputs.shaPath }}
 
-      # Only attached to an actual GitHub Release when the trigger was a
-      # version tag - a manual dispatch run doesn't create/publish a release.
+      # Only attached to an actual GitHub Release when the trigger was a version tag.
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: ${{ steps.locate.outputs.exePath }}
+          files: |
+            ${{ steps.locate.outputs.exePath }}
+            ${{ steps.locate.outputs.shaPath }}
           generate_release_notes: true
+          body: |
+            **SHA-256 of `GamingStackGUI.exe`:** `${{ steps.locate.outputs.sha }}`
+
+            The exe is not code-signed yet, so Windows SmartScreen may warn - see SECURITY.md for what it
+            does and the antivirus scan results.
+
+      # Runs only when the VT_API_KEY secret exists.
+      - name: Scan with VirusTotal
+        if: startsWith(github.ref, 'refs/tags/') && env.VT_API_KEY != ''
+        uses: crazy-max/ghaction-virustotal@v4
+        with:
+          vt_api_key: ${{ secrets.VT_API_KEY }}
+          files: ${{ steps.locate.outputs.exePath }}
+          update_release_body: true

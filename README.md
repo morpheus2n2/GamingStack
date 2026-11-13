@@ -3,336 +3,201 @@
 # GamingStack
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-![Platform](https://img.shields.io/badge/platform-Windows-blue)
+![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-blue)
 ![.NET](https://img.shields.io/badge/.NET-8.0-purple)
-![Status](https://img.shields.io/badge/status-WIP-orange)
-[![Version](https://img.shields.io/badge/version-0.19.0-brightgreen.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.6.0-brightgreen.svg)](CHANGELOG.md)
+[![Release](https://img.shields.io/github/v/release/morpheus2n2/GamingStack)](https://github.com/morpheus2n2/GamingStack/releases)
+[![Security](https://img.shields.io/badge/security-scan%20results-informational)](SECURITY.md)
 
-A fully automated, over-the-top retro-styled Windows 11 gaming setup app.
-Boots through a fake BIOS screen (pulling your *real* motherboard/CPU/RAM/
-GPU/disk info), into an original Win95-inspired boot animation, onto a
-desktop, then opens a terminal window that installs a full gaming/streaming
-app stack and applies gaming tweaks — all in one self-contained app, no
-scripts or extra files to lose. Download it, run it, walk away.
+**A new-PC setup tool that is actually fun.** GamingStack boots through a fake 90s BIOS, a retro
+boot screen and a tiny custom "retro OS" desktop - then installs everything you need for a
+**Gaming / Streaming PC**, an **Office computer** or a **Developer / Home-lab** machine, with the
+settings tweaks you choose, and tells you exactly what it is doing the whole way. Download one
+file, run it, walk away (or stay and play Snake).
 
-The core setup flow (below) is done and stable. Beyond that, this is an
-actively growing project — see [`ROADMAP.md`](ROADMAP.md) for everything
-being considered next (more tweaks, more apps, more automation, more fun).
-Every idea there follows one non-negotiable rule: **anything that changes a
-system setting is disclosed on screen before or as it happens, and can be
-undone.** Nothing here ever changes something silently or leaves you unable
-to put it back.
+Other setup scripts are straight to the point. This one has a defined purpose too - but it makes
+getting there interesting, and gives you a reason to open it again afterwards.
 
-## Features
+![Boot screens](docs/img/boot-themes.jpg)
 
-- **Fake BIOS POST screen** — genuinely reads your motherboard, CPU, RAM,
-  GPU and disks (including each disk's real health status and whether
-  TRIM is enabled) and displays them like a real boot screen, including an
-  animated memory count-up with tick beeps
-- **Original retro boot animation** — gradient sky, a hand-pixelled sun,
-  a rolling-hills silhouette, drifting pixel clouds, and a waving flag that
-  animates off a pre-baked sprite sheet, all hand-authored pixel art scaled
-  up crisp and chunky (no real Windows assets are used, see
-  [Credits & copyright](#credits--copyright))
-- **Desktop stage** with a taskbar (live clock), desktop icons, and a
-  wallpaper
-- **Interactive install wizard**, running inside a terminal window that
-  animates open: shows the full app list grouped under a heading per
-  category, typed out Resident Evil save-point style with a mechanical
-  typewriter tick, then asks whether to install everything, pick items one
-  by one, or bail out — see [How the install works](#how-the-install-works)
-  below
-- **Real installer**: installs the selected apps via `winget` with
-  retries, silently installs every VC++ Redistributable version as one
-  bundled entry, and handles a few apps that need manual download/install
-- **A System Restore point, always** — created once app selection is
-  finalized, before anything installs or changes, no consent screen
-  needed for this one. On top of that, an **optional full disk-image
-  backup** (before any changes, or after everything's set up, your call)
-  — see [Restore point & backup](#restore-point--backup) below
-- **Optional tweaks** — Game Mode, hardware-accelerated GPU scheduling, a
-  choice between the High Performance or hidden Ultimate Performance power
-  plan, Explorer/taskbar decluttering (file extensions, hidden files, the
-  classic right-click menu, hiding the widgets/search/Copilot buttons),
-  background-task CPU reservation (MMCSS), Start menu suggestions/ads,
-  Fast Startup, Windows Update active hours, Xbox Game Bar/Game DVR, and
-  network latency (Nagle's algorithm) — asked about explicitly, never
-  applied silently: a
-  dedicated screen shows each one's real current value and what it would
-  change to, before anything happens. Saying yes writes a
-  `revert-tweaks.cmd` first, which restores every setting to exactly what
-  it was — see [Tweaks](#tweaks) below
-- **Install summary** at the end of a run — totals plus a per-item
-  installed/failed/skipped breakdown, grouped by category, with a
-  plain-English reason next to anything that failed or was skipped (known
-  winget outcomes like "already installed and up to date" are translated
-  out of raw exit codes rather than shown as a mystery failure)
-- **Full install log** written to disk every run (path shown on the
-  summary screen) — every line the terminal window shows, not just failures
-- **Fake shutdown outro** — a Windows 9x-style shutdown sequence plays
-  after the install summary, ending on the classic "It's now safe to turn
-  off your computer" screen, before moving on to the sign-off
-- **Achievement toasts** — small pop-ups (First Blood, Completionist,
-  Redistributable Rampage, Already Perfect, Not Everything's Meant To Be,
-  Speedrunner) fire during a run the moment their real condition is met,
-  with a tracker on the summary screen showing which ones you've earned
-  across the session
-- **Easter eggs** — press <kbd>Delete</kbd> during the BIOS screen for a
-  joke blue screen, decline every install option in the wizard for a small
-  surprise, or find the hidden classic cheat code for a throwaway joke toast
-- Runs as a single self-contained `.exe` — no separate files to install
-  alongside it
+## Highlights
 
-## How the install works
+- **Three setup types.** Pick Gaming, Office or Developer and get a matching app list (~95, ~46
+  and ~81 apps - see the [full catalog](docs/CATALOG.md)).
+- **You stay in control.** Nothing happens until you agree to it. A *final check* screen lists
+  everything that is about to happen and needs you to type `GO`.
+- **Always a safety net.** A System Restore point is created first, every time. Optional full
+  disk-image backup. Every Windows tweak shows its current value first and can be undone.
+- **Everything is logged.** A timestamped log of the whole run is saved to
+  `Documents\GamingStack\logs`, and you can press `C` to stop mid-way.
+- **Real hardware on the BIOS screen.** Your actual motherboard, CPU, RAM, GPU and drives.
+- **A tiny retro OS.** Movable windows, Start menu, draggable icons, Notes, Paint, Command Prompt,
+  four arcade games, a screensaver, trophies and secrets - all drawn in one self-contained exe.
+- **One file.** No scripts, no installer, no extra assets to lose. Self-contained .NET 8.
 
-Once the boot sequence finishes, the terminal window shows the full list
-of what's on offer and asks:
+| BIOS | Desktop and trophies |
+|---|---|
+| ![BIOS](docs/img/bios.jpg) | ![Desktop](docs/img/desktop-trophies.jpg) |
 
-1. **Install everything shown above? [Y/N]** — `Y` installs the full list.
-   `N` moves to the next question.
-2. **Would you like to choose what's installed? [Y/N]** — `Y` walks
-   through every item one at a time (`Y` installs it, `N` skips it),
-   showing a running checklist as you go. `N` moves to the next question.
-3. **Just want to quit? [Y/N]** — `Y` closes the app. `N` leads to a
-   small easter egg, then the same sign-off screen you'd see after a
-   real install.
+## Quick start
 
-Once a real app selection is finalized (everything, or a hand-picked
-subset — even an empty one), a System Restore point is created, an
-optional full disk-image backup is offered, and then a screen asks about
-the tweaks — in that order, before installing anything. See
-[Restore point & backup](#restore-point--backup) and
-[Tweaks](#tweaks) below.
+1. Download `GamingStackGUI.exe` from the [latest release](https://github.com/morpheus2n2/GamingStack/releases/latest).
+2. Double-click it and accept the administrator prompt (it needs admin to install apps and change
+   the settings you approve).
+3. Windows SmartScreen may warn that the app is unrecognised - it is a new, unsigned open-source
+   program. Click **More info > Run anyway** if you are happy with it. You can read the
+   [security notes and scan results](SECURITY.md) first, or build it yourself from source.
+4. Press **SPACE** to skip the intro, choose your setup type and follow the screens.
 
-After a real install run, the summary screen leads into a fake shutdown
-sequence before the sign-off screen — press any key to move past the
-summary, the rest plays itself out.
+**Requirements:** Windows 10 or 11 (64-bit), an internet connection for installs, and *winget*
+(App Installer - already on Windows 11 and recent Windows 10). **Esc** closes the app at any time
+(it is blocked while a backup or install is actually running).
 
-## Restore point & backup
+## How a run works
 
-Once app selection is finalized, GamingStack always creates a Windows
-System Restore point first — no screen to confirm it, it just happens,
-since it's the baseline safety net for everything that follows (installs
-included, not just the tweaks below). If System Restore happens to be off
-for the system drive (the Windows default on most consumer PCs), it's
-switched on and the restore point is retried once before giving up.
+| Step | What happens |
+|---|---|
+| 1. Intro | Fake BIOS (real hardware info) > retro boot screen > the desktop. SPACE skips it. |
+| 2. Choose a setup type | Gaming, Office or Developer. Or `R` to repeat your last setup. |
+| 3. Choose apps | Everything shown, or go through one by one. |
+| 4. Safety net | A restore point is always made. Optionally a full disk-image backup too. |
+| 5. Windows tweaks | Each tweak is listed with its **real current value** and what it would become. You say yes or no. Optional DNS switch and app removal. |
+| 6. **Final check** | One screen with everything that is about to happen. Type `GO` + Enter to start, or `N` to back out. |
+| 7. Install | Live progress, current app, and `C` to stop after the current item. |
+| 8. Summary | What was installed, opened in your browser, skipped or failed - plus where the log, build sheet and undo script are. |
 
-On top of that, a screen offers a full disk-image backup via `wbadmin`:
+### What it will never do
 
-```
-[1] Before anything is installed or changed (a clean, "virgin machine" backup)
-[2] After everything is installed and tweaked (a "gaming ready" backup)
-[3] Skip the image backup - just the restore point above
-```
+- Change a setting you did not see and approve on screen.
+- Change anything without a way back (an undo script is saved for every run).
+- Send your information anywhere. It has no telemetry. The only network use is winget, the downloads
+  listed in the log, and opening vendor pages in your own browser.
+- Install anything you unticked.
 
-Choosing 1 or 2 leads to a drive picker that auto-detects eligible drives
-(anything NTFS-formatted that isn't the system drive) and shows each
-one's free space next to the rough space the backup needs, so it's never
-a guess:
+### Where it saves things
 
-```
-[1] E: (Backup Drive) - 412.0 GB free
-[2] F: (USB) - 58.0 GB free  (may not be enough room)
-```
+| What | Where |
+|---|---|
+| Run logs (install + backup) | `Documents\GamingStack\logs\` |
+| **Undo scripts** (one per run) | `Documents\GamingStack\undo\` |
+| Build sheet (plain-text summary) | `Documents\GamingStack\` |
+| Your progress, settings, icon positions, trophies | `%APPDATA%\GamingStack\progress.json` |
+| Notes app text | `%APPDATA%\GamingStack\notes.txt` |
+| Downloaded installers | `%TEMP%\GamingStack\downloads\` |
 
-Whichever timing is chosen, the backup runs to completion before the flow
-continues — a backup racing against installs in the background would
-capture a half-changed system, not the clean before/after snapshot the
-choice is meant to give you. Expect it to take anywhere from a few minutes
-to a couple of hours depending on the destination, with a plain "don't
-turn off your PC" screen and an elapsed timer while it runs. The summary
-screen reports what actually happened to both the restore point and the
-backup, including the backup's own log file.
+Start menu > **Setup Logs** opens the logs folder.
 
-## Tweaks
+## Windows tweaks
 
-Right before the tweaks screen, one small question decides what the power
-plan tweak targets:
+All optional, all explained on screen, all reversible. Gaming-only tweaks are never offered on the
+Office or Developer setup types.
 
-```
-[1] High performance - Windows' own built-in plan (recommended)
-[2] Ultimate Performance - a hidden Microsoft plan with the last few
-    power-saving throttles removed on top of High performance
+**Every setup type:** show file extensions, show hidden files, classic right-click menu, hide the
+Taskbar widgets button / search box / Copilot button, hide Start-menu suggestions, turn off
+Delivery Optimization (peer-to-peer update sharing), turn off the DiagTrack telemetry service.
 
-Choose 1 or 2
-```
+**Gaming only:** Game Mode on, hardware-accelerated GPU scheduling on, High or Ultimate Performance
+power plan, background-CPU reservation (MMCSS) to 0%, Fast Startup off, Windows Update active hours
+16:00-23:00, Xbox Game Bar / Game DVR off, Nagle's algorithm off, mouse acceleration off, CPU core
+parking off, foreground-app priority boost.
 
-Ultimate Performance is real and Microsoft-documented, just hidden by
-default since it has no benefit on a laptop and a small idle-power cost on
-a desktop that's plugged in. Picking it duplicates the hidden template
-into a real, switchable plan the first time (reusing that same duplicate
-on any later run, rather than creating a new one every time).
+**Developer only:** long file paths on, Developer Mode on.
 
-Then a dedicated screen lists every tweak GamingStack can apply — the
-gaming tweaks (Game Mode, hardware-accelerated GPU scheduling, the power
-plan you just chose), a set of Explorer/taskbar decluttering tweaks (file
-extensions, hidden files, the classic right-click context menu, and hiding
-the taskbar's widgets/search/Copilot buttons), and a handful more (
-background-task CPU reservation, Start menu suggestions/ads, Fast
-Startup, Windows Update active hours, Xbox Game Bar/Game DVR, and network
-latency) — each with its real current value (read live, not assumed) and
-what it would become:
+**Optional extras (you choose):** switch DNS to Cloudflare, Google or Quad9; remove selected
+preinstalled Store apps (News, Weather, Clipchamp, Solitaire, Teams, the Office hub, TikTok,
+Disney+, Spotify) - only the ones actually on your PC, none ticked by default, and the undo script
+reinstalls them from the Store.
 
-```
-Game Mode                                   currently: not set (Windows default)  ->  enabled
-Hardware-accelerated GPU scheduling         currently: off                        ->  on
-Power plan                                  currently: Balanced                   ->  High performance
-File extensions                             currently: hidden (Windows default)   ->  shown
-Hidden files                                currently: hidden (Windows default)   ->  shown
-Right-click context menu                    currently: modern (Windows 11 default) -> classic (full menu, no "Show more options")
-Taskbar widgets button                      currently: shown (Windows default)    ->  hidden
-Taskbar search box                          currently: shown (Windows default)    ->  hidden
-Taskbar Copilot button                      currently: shown (Windows default)    ->  hidden
-Background task CPU reservation (MMCSS)     currently: 20% (Windows default)      ->  0% (games get full priority)
-Start menu suggestions/ads                  currently: shown (Windows default)    ->  hidden
-Fast Startup                                currently: on (Windows default)       ->  off
-Windows Update active hours                 currently: 08:00-17:00 (Windows default) -> 16:00-23:00 (typical evening gaming window)
-Xbox Game Bar / Game DVR                    currently: enabled (Windows default)  ->  disabled
-Network latency (Nagle's algorithm)         currently: not set (Windows default, Nagle's algorithm enabled) -> disabled
+## Restore point and backup
 
-Apply these tweaks?   [Y] Yes    [N] No, skip tweaks
-```
+A System Restore point is **always** created before anything changes. GamingStack tries Windows'
+own restore-point call first and, if that fails, turns System Restore on for the system drive and
+tries again. Optionally it also takes a full disk-image backup (`wbadmin`) to a drive you pick,
+either before the changes or after setup; the backup runs to completion before the next step so it
+is a clean snapshot. The summary tells you whether each one really worked - it never assumes.
 
-The Explorer/taskbar tweaks are per-user settings, so they take effect
-next time Explorer restarts (typically your next sign-in) rather than
-instantly — that's expected, not a failure. The Nagle's algorithm tweak
-targets whichever network interface is actually active right now (found
-via WMI, since this is a per-adapter setting, not a global one) — if none
-can be identified, that row shows "no active network adapter found" and
-is skipped rather than guessed at.
+## The retro desktop
 
-`N` skips every tweak — nothing is touched. `Y` applies them, but not
-before writing `revert-tweaks.cmd` next to the install log: a plain,
-readable script that restores every setting to exactly what it was
-before (or removes it entirely, if it wasn't set at all beforehand). Its
-full path is shown on this screen and again on the summary screen
-afterward, so it's never something you have to go hunting for. Run it as
-Administrator any time to undo everything this step changed.
+After the boot screen you are on a small desktop made entirely inside the one window:
 
-This applies to any future tweak added from `ROADMAP.md`, too — it's a
-hard rule for this project, not a one-off: nothing that changes a system
-setting happens without being shown on screen first, and nothing happens
-that can't be put back.
+- **Windows** you can drag, resize, minimise, maximise and close, with taskbar buttons.
+- **Start menu** and **icons** you can double-click and drag around (positions are remembered);
+  right-click the desktop for a small menu.
+- **Apps:** My Computer (real hardware and drive usage), Trophy Room, Arcade (Snake, Minesweeper,
+  Pong, Breakout), Notes, Paint, Disk Defragmenter (a toy), Command Prompt, Display Properties and
+  a Recycle Bin.
+- **Screensaver** after a few idle minutes (a bouncing logo - a corner hit is a secret trophy).
+- **Trophies** for installing, playing and exploring, plus a few hidden ones. In the Command
+  Prompt, type `HINT` if you want a clue to the secret commands.
+- **Display Properties** lets you pick the boot colours (time-of-day, dawn, day, evening, night),
+  boot style, UI scale and screensaver delay.
 
-## What it installs
+![Desktop apps](docs/img/desktop-apps.jpg)
 
-The wizard groups everything under a heading per category:
+Settings you can also set with environment variables: `GAMINGSTACK_BOOT_THEME`
+(`dawn|day|evening|night`), `GAMINGSTACK_BOOT_STYLE` (`classic|landscape`) and
+`GAMINGSTACK_UI_SCALE` (`1`, `1.25`, `1.5`, `2` ...).
 
-- **Game Launchers** — Steam, Epic, GOG, Ubisoft Connect, Battle.net,
-  Amazon Games, Discord, Playnite to tie the launchers together
-- **Monitoring & Performance** — NVIDIA App, HWiNFO, CPU-Z, Speccy,
-  CrystalDiskInfo, Process Lasso, Microsoft PC Manager, Razer Cortex
-  (direct download - no winget package exists for it)
-- **Streaming & Recording** — Streamlabs Desktop, Medal.tv, Voicemeeter
-  Banana
-- **General Utilities** — VS Code, PowerShell 7, Microsoft 365 Apps,
-  PowerToys, Python 3, VLC, 7-Zip, Vortex Mod Manager
-- **Redistributables** — a single "VC++ Redistributables Pack" entry that
-  silently installs every VC++ runtime version (2005 through 2015+, x86
-  and x64) in one go, since so many games and creator apps quietly expect
-  one of these already being present
-- **RGB & Peripheral Control** — Corsair iCUE, Razer Synapse, OpenRGB (a
-  single open-source app that talks to several vendors' hardware at once,
-  handy if you don't want four separate vendor apps running), plus Hyte
-  Nexus and L-Connect 3
+## What it can install
 
-The full list — and how to change it — is the `Catalog` in
-`InstallerEngine.cs`.
+The complete, always-up-to-date list is in **[docs/CATALOG.md](docs/CATALOG.md)** (generated from the
+code). A taste:
 
-Apps with no reliable `winget` package (Razer Cortex, Hyte Nexus,
-L-Connect 3) are downloaded and installed directly instead, but sit in
-the same pickable list as everything else so you can skip them if you
-don't own that hardware.
+- **Gaming:** Steam, Epic, GOG Galaxy, EA app, Battle.net, Playnite, OBS, Streamlabs, Discord,
+  NVIDIA App, HWiNFO, MSI Afterburner, OCCT, FanControl, iCUE, OpenRGB, RetroArch, 86Box, VC++ and
+  DirectX runtimes...
+- **Office:** Firefox/Chrome/Brave, Microsoft 365, LibreOffice, Acrobat/Foxit/PDFgear, Teams, Zoom,
+  Slack, Dropbox, Bitwarden, Malwarebytes, GIMP, Paint.NET...
+- **Developer:** Git, VS Code, Visual Studio, JetBrains Toolbox, Docker Desktop, WSL, Node, Python,
+  .NET, Go, Rust, Java, PostgreSQL, Terraform, kubectl, Wireshark, WireGuard, Tailscale...
 
-## Requirements
+Apps with **no winget package** (some vendor driver suites) are shown as "opens download page":
+GamingStack opens the vendor's own https page in your default browser and you install from there.
 
-- Windows 10/11 (this uses WinForms and WMI, so it's Windows-only)
-- [`winget`](https://apps.microsoft.com/detail/9nblggh4nns1) (App Installer)
-  — comes preinstalled on current Windows 11
-- [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0) if you're
-  building it yourself
-- Admin rights — the app requests elevation on launch (needed for the
-  install/tweak stage, and for the restore point/backup stage)
-- `wbadmin` — only needed if you choose the optional full disk-image
-  backup; ships with Windows 10/11 by default. Skipping that screen (or
-  picking "skip") doesn't need it at all
-
-## Getting started
+## Building from source
 
 ```bash
-git clone <this-repo-url>
-cd <cloned-folder>
+git clone https://github.com/morpheus2n2/GamingStack.git
+cd GamingStack
 dotnet restore
-dotnet run
+dotnet run                                  # Debug build, no admin prompt (installs/tweaks need admin)
+dotnet publish -c Release -r win-x64        # one self-contained GamingStackGUI.exe (asks for admin)
 ```
 
-Press **Esc** at any point to close the window while testing, or
-**Delete** during the BIOS screen for the easter egg.
+Needs the [.NET 8 SDK](https://dotnet.microsoft.com/download) on Windows. The published exe is in
+`bin/Release/net8.0-windows/win-x64/publish/`. Tagging a version (`v1.6.0`) builds and attaches the
+exe to a GitHub Release automatically. `python tools/gen-catalog.py` regenerates the catalog page.
 
-> **Debugging note:** `dotnet run`/F5 use a Debug-only manifest that does
-> *not* request admin rights (`App.Debug.manifest`) — this is intentional.
-> Requesting elevation from a debug launch throws "the requested operation
-> requires elevation", because `dotnet run` starts the app via
-> `CreateProcess`, which can't silently elevate a child process the way
-> double-clicking an .exe can. Registry tweaks will just no-op/fail
-> gracefully in Debug as a result. To test the real elevated behavior,
-> either run a Release publish (below) or launch VS Code itself as
-> Administrator before running.
+Project rules and architecture notes are in [CLAUDE.md](CLAUDE.md) - read it before changing
+anything structural (it explains *why* it is one process with no helper scripts).
 
-### Building a standalone .exe
+## Documentation
 
-```bash
-dotnet publish -c Release -r win-x64
-```
-
-The output lands in `bin\Release\net8.0-windows\win-x64\publish\` as a
-single self-contained executable, using the real `App.manifest`
-(`requireAdministrator`) — double-clicking it triggers the UAC prompt as
-expected.
-
-## Roadmap
-
-The original build order is complete:
-
-- [x] Retro boot sequence (BIOS, boot animation, desktop, terminal)
-- [x] Real installer stack (winget loop, manual installer fallback, tweaks)
-- [x] Interactive install wizard (install all / pick individually / quit)
-- [x] Installation summary screen
-- [x] Fake "shutting down" outro
-- [x] Achievement toast notifications
-- [x] Konami code easter egg
-- [x] Real boot animation assets (hand-pixelled sprites, original artwork)
-
-Everything under consideration beyond that — more system tweaks, more apps,
-more automation, more fun — lives in [`ROADMAP.md`](ROADMAP.md), grouped by
-kind, along with the disclosed/reversible rule anything system-changing has
-to follow before it's in scope.
+- [Wiki](https://github.com/morpheus2n2/GamingStack/wiki) - guides, safety, FAQ, troubleshooting
+- [CHANGELOG](CHANGELOG.md) - what changed in each version
+- [ROADMAP](ROADMAP.md) - what is planned
+- [SECURITY](SECURITY.md) - safety notes, how to report a problem, antivirus scan results
+- [CONTRIBUTING](CONTRIBUTING.md) - how to help
 
 ## Safety note
 
-This app requests admin rights and will install applications and modify
-registry settings on your machine. Test it in a VM or a spare machine
-before running it on anything you care about, and review the app list in
-`InstallerEngine.cs` before running it on your own PC. Every system-level
-tweak it applies (today: Game Mode, hardware-accelerated GPU scheduling,
-the power plan - including the hidden Ultimate Performance plan, if you
-pick it - file extensions/hidden files, the classic right-click context
-menu, the taskbar widgets/search/Copilot buttons, MMCSS background-task
-CPU reservation, Start menu suggestions/ads, Fast Startup, Windows Update
-active hours, Xbox Game Bar/Game DVR, and Nagle's algorithm) is a
-standard, documented Windows setting — nothing here is a hidden or one-way
-change, and that stays true for anything added from
-[`ROADMAP.md`](ROADMAP.md) going forward.
+GamingStack changes things on your PC when you tell it to. It shows you everything first, makes a
+restore point, writes an undo script and a log - but it is still your machine. Read the
+screens, and if you are unsure, say no (or press `N` on the final check). Use at your own risk; see
+the [license](LICENSE).
 
-## Credits & copyright
+## Credits and copyright
 
-The retro aesthetic here is inspired by classic BIOS boot screens and
-Windows 9x, but every visual asset (the logo, the boot animation's sun,
-hills, clouds and flag sprites, the icons, the BSOD easter egg text) is
-original artwork made for this project — no Microsoft logos, boot
-animations, or copyrighted assets are included or redistributed. The
-banner image above and the desktop wallpaper are AI-generated.
+All the boot art, BIOS logo, icons, games and sound effects are original work generated in code,
+and the retro look is an affectionate homage - no Microsoft logos or Windows boot animations are
+copied. Two embedded files were *supplied by the project owner* rather than generated: the desktop
+wallpaper (AI-generated; it shows retro hardware that may carry real-world product names) and the
+boot chime `Resources/win95.wav`. Their licensing is the owner's responsibility - replace them with
+your own if you redistribute this project. Windows is a trademark of Microsoft; all other product
+names belong to their owners.
+
+Built by Paul ([@morpheus2n2](https://github.com/morpheus2n2)) with Claude.
 
 ## License
 
-[MIT](LICENSE) — do what you like with it.
+[MIT](LICENSE)

@@ -1,15 +1,367 @@
 # Changelog
 
-Versioned using [Semantic Versioning](https://semver.org/) (`MAJOR.MINOR.PATCH`).
-While the project sits at `0.y.z` (nothing's been publicly released yet),
-minor bumps mean a new feature, patch bumps mean a fix/tweak with no new
-feature - see "Versioning" in `CLAUDE.md` for the exact rule. The version
-lives in `GamingStackGUI.csproj` (`<Version>`) and should be bumped in the
-same change that updates this file.
+Versioned using [Semantic Versioning](https://semver.org/) (`MAJOR.MINOR.PATCH`): a minor bump
+means a new feature, a patch bump means a fix or visual polish with no new feature. The version
+lives in `GamingStackGUI.csproj` (`<Version>`) and is bumped in the same change that updates this
+file. Newest entries are at the top. Entries before 1.0.0 were written before the first public
+build and have no real dates.
 
 Everything below `0.6.2` predates versioning entirely, so those entries are
 backfilled from the original milestone-based changelog and given version
 numbers retroactively - there's no real date for them, only relative order.
+
+## [1.6.0] - Full logging, a final check before anything changes, 70 more apps, download links
+
+### Added
+- **Final check screen** (the point of no return): before anything is installed or changed,
+  one screen lists exactly what is about to happen - how many apps and how they install, whether
+  Windows settings change, DNS changes, apps that will be removed, the safety net, and where the
+  log goes. You must type `GO` and press Enter (a single stray key can't start it); `N` backs out
+  with nothing changed.
+- **Full run log** in `Documents\GamingStack\logs\`: every run writes a timestamped log that begins
+  with a header (app version, computer, Windows version, whether it ran as administrator, setup
+  type, backup choice, every tweak option and every item with how it installs) and then records
+  each step with its result and how long it took, ending in a summary. Manual downloads are
+  logged with their size, SHA-256 and who signed them. The backup log lives in the same folder.
+- **Undo scripts are now kept**: one per run in `Documents\GamingStack\undo\` (they used to be
+  overwritten each run and lived in Temp, which Windows clears). A second run can no longer erase
+  the record of your original settings.
+- **Live progress and Stop**: the install screen shows what it is working on, a progress bar and
+  "n of N done"; press `C` to stop after the current item. Stopping also skips tweaks and app
+  removals that hadn't started, and says so in the log.
+- **Download links for apps with no winget package**: new "opens" entries (AMD Software, Intel
+  Driver & Support Assistant, MSI Center, ASUS Armoury Crate, Cinebench, Wallpaper Engine) open the
+  vendor's own https page in your default browser. The three direct-download apps now fall back to
+  their vendor page if the automatic install fails. Results show as "opened in browser" in the
+  summary and the build sheet. (A bundled mini-browser was considered and rejected: the default
+  browser is safer, already trusted and needs no extra software.)
+- **About 70 more apps**, every winget ID checked against a live listing: Brave, Proton VPN,
+  Malwarebytes, Dropbox, Notion, Signal, Telegram, Paint.NET, GIMP, Inkscape, HandBrake, Audacity,
+  Rainmeter, Lively Wallpaper, Mod Organizer 2, RetroArch, PCSX2, DOSBox-X, ScummVM, TeamSpeak,
+  Mumble, GeForce NOW, LibreHardwareMonitor, RTSS, Neovim, Fork, Insomnia, WinMerge, MobaXterm,
+  CMake, lazygit, Starship, ripgrep, fzf, jq, PostgreSQL, MongoDB Compass, HeidiSQL, Java 21,
+  .NET 9, Helm, minikube, Bicep, Vagrant, Ubuntu for WSL, Ventoy, WireGuard, Nmap and more.
+  The full list is generated into `docs/CATALOG.md`.
+- **Three-column lists** for the app list and the summary, so ~100 entries still fit; the typing
+  speed adapts so even the longest list finishes in about 5 seconds.
+- Start menu > **Setup Logs** opens the logs folder.
+- A `docs/` folder (catalog, screenshots and wiki pages), `SECURITY.md`, `CONTRIBUTING.md`, issue
+  templates and a generator script (`tools/gen-catalog.py`).
+
+### Changed
+- **Code tidy**: `MainForm.cs` (2,700 lines) is split by topic into `MainForm.Intro/Wizard/
+  Finale/Achievements.cs`; unused code and `using` lines removed; stale comments fixed; added
+  `.editorconfig`, `.gitattributes` and a fuller `.gitignore`.
+- README, wiki and roadmap rewritten to match the app as it is now.
+
+## [1.5.0] - Scale fixed properly, rearrangeable icons, a better My Computer, secret clues
+
+### Added
+- **Desktop icons can be rearranged**: drag one to any free spot (or onto another icon to
+  swap). Positions are remembered. Right-click the bare desktop for a small menu:
+  Arrange icons (reset the layout), Display Properties, Command Prompt.
+- **My Computer redone** as a control-panel page: a banner with a big computer icon, then
+  boxes for Processor, Memory, Graphics, Motherboard, Storage (a usage bar per drive with
+  real free space), Disks and This session. Text and spacing grow with the window, so
+  maximising it makes everything bigger.
+- **Command Prompt clues**: `HINT` gives a riddle for a secret command you haven't found,
+  `SECRETS` shows your progress (found ones are named, the rest are ????????), and there
+  are now 8 secret commands including two new ones (`FORTUNE`, `COWSAY`). New trophy:
+  Secret Keeper (find them all). After that, `HINT` points at the keyboard secret too.
+- The Konami code trophy now shows up in the Trophy Room (as "Secret trophy" until found).
+
+### Fixed
+- **Scale**: the UI now defaults to exactly 100% (it was following Windows' 150% and then
+  adding more on top). All fonts are now sized in pixels, so text and layout stay in
+  proportion at any scale - this was the cause of text overlapping and running off the
+  edge in My Computer, Defrag, the Start menu and the app list. Display Properties offers
+  100% (default), 125%, 150%, 200% and 250%. Desktop icons grow a little with the screen.
+- The typewriter sound no longer keeps playing after you close or minimise the installer.
+- The trophy pop-up is wider and cleaner.
+- Defrag, Display Properties and the Start menu layouts (text no longer overlaps or runs
+  past the edge); the app list switches to a smaller font when it is tight.
+
+### Notes
+- Written and built, but only partly checked on screen: the live test runs kept being
+  interrupted, so the new My Computer, icon dragging, right-click menu and Defrag layout
+  have not been seen running yet.
+
+## [1.4.1] - Gentler scale, a proper clock, a Trophy Room with style
+
+### Changed
+- **UI scale is gentler**: auto is now 1x, or 1.25x on 4K screens (it was 2x, which was
+  far too big). Display Properties offers Auto / 1x / 1.25x / 1.5x / 2x.
+- **Taskbar clock** redone: a sunken tray with a small speaker icon and the time (bold)
+  stacked cleanly over the date; hover it for the full date.
+- **Trophy Room restyled**: a chrome pixel title, a gradient progress bar, stat badges,
+  and one bevelled card per trophy with a pixel-art cup - gold and sparkling when earned,
+  a dark silhouette when locked.
+- **Desktop icon labels** no longer clip at the screen edge or collide between columns.
+
+## [1.4.0] - UI scale, six more things to do, repeat last setup
+
+### Added
+- **UI scale** (`MainForm.Shell.cs`): the desktop, windows, icons and BIOS text are
+  drawn through a scale transform, so on a 4K screen everything is bigger instead of
+  tiny. Auto-picks from the screen height (1x at 1080p, 2x at 4K); change it in Display
+  Properties or with `GAMINGSTACK_UI_SCALE`.
+- **Arcade** is now a game picker: Snake, **Minesweeper**, **Pong** (first to 7 vs the
+  computer) and **Breakout** (`MiniGames.cs`), each with its own trophy and best score.
+- **Screensaver**: after a few idle minutes a starfield flies past with a bouncing
+  GAMINGSTACK logo - hit a corner exactly for a secret trophy. Never starts while a backup
+  or install is running.
+- **Display Properties**: pick the boot colours (time of day / dawn / day / evening / night),
+  boot style (classic sky / landscape), UI scale and screensaver delay. Saved between runs.
+- **Notes** (autosaved to `%APPDATA%\GamingStack\notes.txt`), **Paint** (palette, brush
+  size with [ and ]), **Disk Defragmenter** (a toy that tidies coloured blocks - your
+  drive is 0% faster), and a **Command Prompt** with real commands (HELP, VER, DIR,
+  NEOFETCH, ...), launchers (INSTALL, SNAKE, PONG...) and secret commands.
+- **Streaks and more trophies**: day streak counter, On a Roll, Regular, Sweeper, Pong
+  Champ, Brick Breaker, Fully Defragmented, Hacker Voice, Perfect Corner (17 in total).
+- **Repeat last setup**: the first installer screen offers `[R]` to redo your previous
+  setup type and app list. It still goes through the backup question and the tweak
+  consent screen like any other run.
+- Five new desktop icons, a bigger two-column Trophy Room, and right-click / drag / typed
+  text support for windows.
+
+### Notes
+- Known layout problems from a full tour of the app are being fixed next: overlapping
+  rows in the app list at some sizes, desktop icon labels overlapping between columns,
+  Trophy Room rows, clock text, and a few spacing issues in the new apps.
+
+## [1.3.0] - A real desktop: windows, Start menu, apps, trophies
+
+### Added
+- **Proper windows** (`MainForm.Shell.cs`, `RetroWindow.cs`): every window has a
+  title bar with minimise, maximise/restore and close buttons, can be dragged by its
+  title (double-click the title to maximise), resized from the bottom-right corner,
+  and gets a button on the taskbar (click it to minimise or bring it back). The
+  installer is now one of these windows instead of a plain black box; it can't be
+  closed while a backup or install is running.
+- **Working Start menu** (Setup Wizard, My Computer, Trophies, Arcade, Shut Down) and
+  **working desktop icons** - single-click selects, double-click opens. The Gaming,
+  Office and Developer icons choose that setup type for you.
+- **New apps** (`MainForm.Apps.cs`): My Computer (real hardware details), Trophy
+  Room, Arcade with Snake (`SnakeGame.cs`), and a Recycle Bin.
+- **A reason to come back** (`ProgressStore.cs`): trophies, run count, apps installed
+  all-time and your Snake high score are saved to `%APPDATA%\GamingStack\progress.json`
+  (the app's own data - not a Windows setting). Three new trophies: Snake Charmer,
+  Welcome Back (open it on another day) and Desktop Explorer (open every app).
+- **Classic boot layout**: a full-screen cloudy sky with a big waving flag and a chrome
+  "GAMINGSTACK 95" wordmark, in the spirit of a 90s boot screen but all original.
+  Still follows the time-of-day colours. Set `GAMINGSTACK_BOOT_STYLE=landscape` for the
+  mountains-and-hills scene.
+- On the desktop, SPACE opens the installer straight away. The installer no longer
+  opens by itself if you have already opened another app.
+
+### Fixed
+- The first installer screen's description lines overlapped their headings.
+
+### Notes
+- On very large screens (4K) the window text is small - a UI scale option is next.
+
+## [1.2.0] - POST sounds, skip key, desktop icons, time-of-day boot
+
+### Added
+- **BIOS sounds through the mixer** (`RetroAudio.cs`, renamed from the typewriter
+  class): a drive spin-up whine, drive-seek clicks, memory-count ticks and the
+  classic single "all OK" POST beep. These replace `Console.Beep`, which needs a
+  motherboard speaker most PCs no longer have.
+- **Quick-skip**: press SPACE during the BIOS, boot or desktop to jump straight to
+  the terminal (a small hint shows on those screens).
+- **Desktop icons for the three setup types** (Gaming, Office, Developer) in
+  pixel art (`DesktopIcons.cs`), and a Start button with a raised 3D look and a
+  small chip logo.
+- **Boot scene follows the time of day** (`BootTheme.cs`): dawn (5-8), day (8-17),
+  evening (17-21, the original look) or night with a moon (21-5). Set the
+  environment variable `GAMINGSTACK_BOOT_THEME` to `dawn`, `day`, `evening` or
+  `night` to force one.
+
+### Changed
+- **Wallpaper is back to the original image** (kept sharp by the one-off
+  high-quality scale + light sharpen from 1.1.0). The pixel-art desk experiment
+  (`DeskScene.cs`) was removed.
+
+## [1.1.1] - Visual rebuild: BIOS logo, flag, loading bar, wallpaper
+
+### Changed
+- **BIOS screen** (`BiosLogo.cs`): new pixel-art chip emblem with a chrome
+  "GAMINGSTACK" wordmark, a round "GAME READY" badge, a shine that sweeps across
+  both, a double-line frame, a bottom BIOS ID line and faint CRT scanlines.
+  All original artwork.
+- **Boot flag redrawn**: the wave now grows toward the free end, folds are
+  shaded smoothly, the cloth squashes where it tilts, the end has a swallow-tail
+  notch, and the pole has a finial and grommets.
+- **Boot loading bar** is now a full-width gradient strip along the very bottom
+  (sliding dithered colours plus a moving highlight) instead of separate blocks.
+- **Desktop wallpaper rebuilt from scratch** (`DeskScene.cs`): an original
+  pixel-art gamer's desk - CRT, tower, keyboard, mouse, console, pad, discs,
+  floppies, cartridges, handheld, speaker, headphones, magazine, arcade stick,
+  snacks - drawn in code at the screen's exact size, so it is sharp at any
+  resolution. The old image (which showed real brand logos) is gone, along with
+  the blur fix code it needed.
+- Shared pixel-drawing helpers and a full A-Z pixel font live in
+  `PixelCanvas.cs`.
+
+## [1.1.0] - Three setup types, 16-bit boot scene, typewriter sound
+
+### Added
+- **Setup type picker** - the first terminal screen asks: [1] Gaming/Streaming,
+  [2] Office, [3] Developer/Home lab. Each gets its own app list (`Profiles` on
+  every catalog entry, `InstallerEngine.CatalogFor`). Gaming-only tweaks (Game
+  Mode, GPU scheduling, power plan, MMCSS, core parking, mouse acceleration,
+  Game DVR, Nagle, foreground priority, Fast Startup, active hours) are only
+  shown and applied on the Gaming profile. Everything else keeps the same
+  disclosed + reversible rule.
+- **Developer tweaks** (Developer profile only, with preview + undo line): long
+  file paths, Developer Mode.
+- **New apps** (all IDs checked with `winget show`): Firefox, Chrome, EA app,
+  Rockstar launcher, itch.io, Heroic, Xbox app, OBS Studio, Elgato Stream Deck and
+  Wave Link, Moonlight, Parsec, GPU-Z, CapFrameX, OCCT, FanControl, Display
+  Driver Uninstaller, Logitech G HUB, SteelSeries GG, SignalRGB, DirectX
+  runtime, .NET Desktop Runtimes (8 + 9), Spotify, Bitwarden; Office: Teams, Zoom,
+  Slack, LibreOffice, Acrobat Reader, Thunderbird, Notepad++, Obsidian, Google
+  Drive, AnyDesk, Everything; Developer: Git, GitHub CLI/Desktop, Windows
+  Terminal, Visual Studio 2022, JetBrains Toolbox, Postman, DBeaver, Node.js,
+  .NET SDK 8, Go, Rust, Docker Desktop, WSL, Azure CLI, kubectl, Terraform,
+  Tailscale, Wireshark, PuTTY, WinSCP, Sysinternals, VirtualBox, Etcher, Rufus,
+  Claude Code.
+- Build sheet now records the setup type.
+
+### Changed
+- **Boot scene redrawn** in a 16/32-bit style (`BootScene.cs`): dithered gradient
+  sky with stars, striped sun, snow-capped parallax mountains, pine-covered hills,
+  shaded clouds, birds, and a waving flag with pixel lettering. It is drawn in code
+  at low resolution and scaled up with whole-number pixels, so it stays crisp at
+  any screen size. The four old sprite PNGs were removed.
+- **Desktop wallpaper is no longer blurry**: scaled once at load with the
+  high-quality filter plus a light sharpen (it can't add detail the 1536x1024
+  image doesn't have).
+- **Terminal list types faster** (60 -> 150 characters/second) and the list shrinks
+  its row spacing to fit long catalogs.
+- **Typewriter sound replaced** (`TypewriterAudio.cs`): a small software mixer plays
+  layered key clacks, heavier space-bar thunks and a bell at the end, instead of
+  one short tick. All synthesised in code (no audio files).
+
+### Removed / tidied
+- Duplicate `Wallpaper.png` (identical to `banner.png`), old boot sprites, unused
+  helpers and `using` lines, stale `HANDOFF.md`.
+
+### Notes
+- Not run on a real PC yet: the new screens' on-screen layout, the typewriter
+  sound (written without being able to listen to it), the Developer tweaks, and
+  installs of the new apps.
+
+## [1.0.0] - 1.0: DNS, debloat, build sheet and a big polish pass
+
+### Added
+- **DNS switch** (optional): pick Cloudflare, Google or Quad9 for the active
+  adapter's IPv4 DNS. Default is "keep mine". The old setting (automatic or
+  your own servers) is saved to the undo script first.
+- **Debloat** (optional, nothing ticked by default): scans for preinstalled
+  Store apps (News, Weather, Clipchamp, Solitaire, Teams, Office hub, TikTok,
+  Disney+, Spotify) and only offers the ones actually installed. Removal uses
+  `winget uninstall`; the undo script reinstalls each from the Store.
+- **New apps**: MSI Afterburner, WizTree, ShareX, Sunshine, EarTrumpet, Ditto.
+- **Build sheet**: a plain-text summary saved to `Documents\GamingStack`
+  after each run (installed / skipped / needs attention / system changes).
+- **Credits screen** after the summary (any key skips it).
+
+### Fixed
+- winget output is now read as it arrives, so a chatty install can no longer
+  freeze on a full pipe; the useful last lines are written to the log.
+- The undo script is written as changes are made, not only at the very end,
+  so a crash or power cut mid-run still leaves a usable undo.
+- Core-parking undo fallback was `64`; it is now `100` (percent).
+- Mouse acceleration change now applies straight away, not at next sign-in.
+- Esc / closing the window is blocked while a backup or install is running.
+- The terminal window is bigger by default and the tweak list shrinks its
+  spacing to fit, so the longer lists no longer run off the bottom.
+- Downloads now have a 10 minute timeout and a User-Agent.
+
+### Notes
+- This build was written without being able to compile it in the authoring
+  environment. It has since been built with `dotnet build` (0 errors, 0
+  warnings); the debloat uninstall, Store reinstall IDs, DNS switch, Credits
+  and Build Sheet screens still need testing on a real PC.
+
+## [0.21.0] - AI Assistants category
+
+### Added
+- A new **"AI Assistants"** catalog category, with every entry checked
+  against a live winget listing before being added:
+  - **Claude** (`Anthropic.Claude`) - confirmed current and actively
+    maintained.
+  - **ChatGPT** - installed via `9NT1R1C2HH7J`, the Microsoft Store
+    listing ID for the official Windows app, documented by OpenAI's own
+    help pages as the winget-based install path for IT/enterprise
+    rollouts. Not a community `winget-pkgs` ID like the rest of the
+    catalog, but `winget` resolves it the same way since it's
+    unambiguous.
+  - **LM Studio** (`ElementLabs.LMStudio`) and **Ollama**
+    (`Ollama.Ollama`) - local, open-model runners, so "other providers"
+    means more than just a second hosted chatbot.
+
+### Notes
+- Google Gemini is deliberately left out - the only winget listing found
+  for it is an unofficial third-party wrapper, not a package published
+  by Google. Perplexity is left out too - its winget package is
+  currently being removed upstream. Both worth revisiting if that
+  changes; see `ROADMAP.md`.
+
+## [0.20.0] - Windows 98 gaming VM, and five more disclosed tweaks
+
+### Added
+- **86Box (Windows 98 gaming VM)** - a new "Retro Computing" catalog category,
+  with `86Box.86Box` as the only entry (winget ID confirmed merged into
+  `winget-pkgs` via PR #207918). 86Box emulates the actual period
+  chipsets/sound/graphics Windows 98 games expect, rather than a generic
+  modern VM. Once installed, GamingStack drops a plain-text
+  `READ ME FIRST.txt` on the desktop, in a "Windows 98 Gaming VM" folder,
+  covering:
+  - That a legally-owned Windows 98 ISO/key and a set of ROM files (BIOS
+    dumps from real hardware) are both bring-your-own - neither is, or
+    could be, shipped by GamingStack.
+  - Where 86Box looks for ROM files (`%LOCALAPPDATA%\86Box\roms` and
+    `%PROGRAMDATA%\86Box\roms`).
+  - A real, period-accurate example hardware profile (Pentium II
+    "Deschutes" @ 200MHz, BX-chipset board, 3dfx Voodoo3 3500 AGP, Sound
+    Blaster 16 PnP, 128MB RAM) to use in 86Box's own "Add Machine" wizard.
+  - This is deliberately guidance, not a pre-built `.cfg` file - 86Box's
+    config format is version-specific and getting it wrong by hand would
+    produce a VM that silently fails to boot, which is worse than
+    pointing at 86Box's own wizard. See "Notes" below.
+- Five more items on the `ConfirmTweaks` screen, same disclosed/reversible
+  pattern as everything else there:
+  - **Mouse acceleration ("Enhance pointer precision")** -
+    `MouseSpeed`/`MouseThreshold1`/`MouseThreshold2`
+    (`HKCU\Control Panel\Mouse`) all set to `0`, the same effect as
+    unchecking "Enhance pointer precision" in Control Panel.
+  - **CPU core parking** - the "Processor performance core parking min
+    cores" power setting set to 0% (all cores stay available) on both
+    AC and DC, via `powercfg`, so Windows stops parking cores it thinks
+    are idle.
+  - **Foreground app priority (`Win32PrioritySeparation`)** -
+    (`HKLM\SYSTEM\...\PriorityControl`) set to `26` (short, fixed
+    quantums with a high foreground boost), Microsoft's own documented
+    value for this, not an undocumented hack.
+  - **Delivery Optimization** - `DODownloadMode`
+    (`HKLM\SOFTWARE\Policies\Microsoft\Windows\DeliveryOptimization`) set
+    to `0`, so Windows Update downloads stay HTTP-only instead of peer-
+    sharing over the local network or internet.
+  - **Telemetry (DiagTrack service)** - the `DiagTrack` service stopped
+    and its `Start` value set to disabled
+    (`HKLM\SYSTEM\...\Services\DiagTrack`).
+
+### Notes
+- No VM config file is generated for 86Box - see "Added" above. This was
+  a deliberate scope decision after the config schema couldn't be pinned
+  down reliably enough to fabricate one with confidence; shipping
+  verified guidance instead of a guessed config avoided the risk of a
+  machine that looks set up but doesn't actually boot.
+- The debloat app-list idea from `ROADMAP.md` is still intentionally not
+  part of this release - a different shape of feature, still parked for
+  its own round.
 
 ## [0.19.0] - Active hours, Game DVR, Nagle's algorithm, and read-only TRIM/health reporting
 

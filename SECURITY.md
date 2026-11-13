@@ -35,7 +35,18 @@ Results for each release are recorded here, with exactly what was and was not ch
 
 | Version | SHA-256 of the released `GamingStackGUI.exe` |
 |---|---|
+| 1.6.1 | `31e8f6f032873ca5ccc84f95d5ec9da112253af488e14bc563aae20c45be9627` |
 | 1.6.0 | `e0f4672a58a966177c3c24fcda4ce949374b440097b29b0cee35cbba14decd7f` |
+
+**1.6.1 release exe (scanned 2026-11-13, by the release workflow):** VirusTotal
+[full file scan](https://www.virustotal.com/gui/file/31e8f6f032873ca5ccc84f95d5ec9da112253af488e14bc563aae20c45be9627)
+of the real 69 MB `GamingStackGUI.exe`: **2 of 70 engines flagged it** - Bkav Pro
+(`W32.Malware.AEA4C5FF`) and Zillya (`Trojan.Agent.Win32.4695414`). All 68 others, including Microsoft
+Defender, Kaspersky, ESET, Bitdefender, Avast, AVG, Malwarebytes, CrowdStrike, Sophos and ClamAV, reported
+nothing. Both detections are generic/heuristic labels from smaller engines, not named malware families, and
+are the typical false-positive pattern for an unsigned single-file .NET program that asks for administrator
+rights (see below). They are listed here rather than hidden; the source code is all in this repository so
+anyone can check what the program does.
 
 **1.6.0 (checked 2026-11-13):**
 
@@ -49,9 +60,9 @@ Results for each release are recorded here, with exactly what was and was not ch
   ([report](https://www.virustotal.com/gui/file/11e51507ce5618fe0281c96a2ca1b681572e9155b13f30a390512d4cae474b83)).
   This is the app's own code, *not* the 72 MB single-file release exe (which also bundles the .NET
   runtime), and it is from a local build, so its hash is not the one in the table above.
-- **Full release exe scan - being automated.** The release workflow scans every tagged release with
-  VirusTotal when a `VT_API_KEY` repository secret exists, and writes the report link into the release
-  notes. Until the first such release is published, the exe itself has not been scanned.
+- **Release exe scan - automated from 1.6.1.** The release workflow scans every tagged release with
+  VirusTotal (the `VT_API_KEY` repository secret is set). Results for each version are listed above.
+  The 1.6.0 exe itself was not scanned.
 
 **Please read this honestly:** a self-contained single-file .NET program that asks for administrator
 rights, installs software and changes settings can look "suspicious" to some antivirus engines even

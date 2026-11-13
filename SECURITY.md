@@ -43,12 +43,15 @@ Results for each release are recorded here, with exactly what was and was not ch
   reputation engines: **0 of 93 flagged it**
   ([report](https://www.virustotal.com/gui/url/3d877f4e40e2ec56a9c76a778cae62c29692be3fa7eaf0393745b123107b2086)).
   This checks the link and its host, *not* the contents of the file.
-- **Full file scan - not run yet.** The exe is 72 MB, and VirusTotal only analyses a file's contents
-  when someone uploads the file itself. To add it: upload `GamingStackGUI.exe` at
-  <https://www.virustotal.com/gui/home/upload> (or add a free VirusTotal API key as a repository secret
-  named `VT_API_KEY` - the release workflow then scans every tagged release automatically and writes
-  the report link into the release notes). The file report is at
-  `https://www.virustotal.com/gui/file/<the SHA-256 above>` once it exists.
+- **Program code scan - done, clean.** The project's own compiled code (`GamingStackGUI.dll`, 149 KB,
+  SHA-256 `11e51507ce5618fe0281c96a2ca1b681572e9155b13f30a390512d4cae474b83`, from a local build) was
+  uploaded to VirusTotal: **0 of 68 engines flagged it**
+  ([report](https://www.virustotal.com/gui/file/11e51507ce5618fe0281c96a2ca1b681572e9155b13f30a390512d4cae474b83)).
+  This is the app's own code, *not* the 72 MB single-file release exe (which also bundles the .NET
+  runtime), and it is from a local build, so its hash is not the one in the table above.
+- **Full release exe scan - being automated.** The release workflow scans every tagged release with
+  VirusTotal when a `VT_API_KEY` repository secret exists, and writes the report link into the release
+  notes. Until the first such release is published, the exe itself has not been scanned.
 
 **Please read this honestly:** a self-contained single-file .NET program that asks for administrator
 rights, installs software and changes settings can look "suspicious" to some antivirus engines even

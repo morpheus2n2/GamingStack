@@ -76,6 +76,11 @@ getting there interesting, and gives you a reason to open it again afterwards.
 
 ### Where it saves things
 
+The exe can be run from anywhere (Downloads, Desktop, a USB stick) - it does not need to be in a
+particular folder. It saves its files to **your own Windows "Documents" folder** (whatever Windows says
+that is: `C:\Users\<you>\Documents`, or `...\OneDrive\Documents` if OneDrive backs it up), and to your
+AppData folder. When a run finishes, the Summary screen shows the exact log path.
+
 | What | Where |
 |---|---|
 | Run logs (install + backup) | `Documents\GamingStack\logs\` |

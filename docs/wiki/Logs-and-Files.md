@@ -1,5 +1,10 @@
 # Logs and Files
 
+The exe can run from anywhere (Downloads, Desktop, a USB stick). It does not save anything next to itself.
+"Documents" below means **your own Windows Documents folder, wherever Windows keeps it** - usually
+`C:\Users\<you>\Documents`, or `...\OneDrive\Documents` when OneDrive backs it up. The Summary screen shows
+the exact log path, and Start menu > **Setup Logs** opens it.
+
 | What | Where |
 |---|---|
 | Install log | `Documents\GamingStack\logs\gamingstack_<date>_<time>.log` |

@@ -23,8 +23,9 @@ Compare with the hash on the release page (and the `GamingStackGUI.exe.sha256` f
 
 Results are recorded in
 [SECURITY.md](https://github.com/morpheus2n2/GamingStack/blob/master/SECURITY.md#antivirus-scan-results).
-For 1.6.0, VirusTotal's URL/reputation scan of the download link was clean (0 of 93). A full scan of the
-exe's contents needs the file to be uploaded to VirusTotal; SECURITY.md says how it is being added.
+For 1.6.0: VirusTotal's scan of the download link was clean (0 of 93), and a scan of the app's own compiled
+code (`GamingStackGUI.dll`) was clean (0 of 68). The 72 MB release exe itself is scanned automatically on
+future tagged releases once a VirusTotal key is added to the repository; SECURITY.md has the details and links.
 
 Why a clean program can still trigger a scanner: it is a self-contained single-file .NET exe that asks for
 administrator rights, runs installers silently and edits registry settings. Those behaviours look similar to

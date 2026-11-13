@@ -17,12 +17,14 @@ This page explains it in more detail.
 Get-FileHash .\GamingStackGUI.exe -Algorithm SHA256
 ```
 
-Compare with the hash on the release page and in SECURITY.md.
+Compare with the hash on the release page (and the `GamingStackGUI.exe.sha256` file next to the download) and in SECURITY.md.
 
 ## Antivirus scan results
 
-Releases are scanned with [VirusTotal](https://www.virustotal.com/); results are recorded in
+Results are recorded in
 [SECURITY.md](https://github.com/morpheus2n2/GamingStack/blob/master/SECURITY.md#antivirus-scan-results).
+For 1.6.0, VirusTotal's URL/reputation scan of the download link was clean (0 of 93). A full scan of the
+exe's contents needs the file to be uploaded to VirusTotal; SECURITY.md says how it is being added.
 
 Why a clean program can still trigger a scanner: it is a self-contained single-file .NET exe that asks for
 administrator rights, runs installers silently and edits registry settings. Those behaviours look similar to

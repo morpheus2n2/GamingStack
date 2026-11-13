@@ -31,12 +31,24 @@ The .NET build is not byte-for-byte reproducible, so the hashes of your own buil
 
 ## Antivirus scan results
 
-The released exe is scanned with [VirusTotal](https://www.virustotal.com/). The result for each
-version is recorded here:
+Results for each release are recorded here, with exactly what was and was not checked.
 
-| Version | SHA-256 | Result |
-|---|---|---|
-| 1.6.0 | `4c22bc1601588edd72bb38869a233051c90b7f7ad785f60aad2100912d7176b9` | _scan pending - see below_ |
+| Version | SHA-256 of the released `GamingStackGUI.exe` |
+|---|---|
+| 1.6.0 | `e0f4672a58a966177c3c24fcda4ce949374b440097b29b0cee35cbba14decd7f` |
+
+**1.6.0 (checked 2026-11-13):**
+
+- **Download link scan - done, clean.** VirusTotal checked the release download address with its URL/
+  reputation engines: **0 of 93 flagged it**
+  ([report](https://www.virustotal.com/gui/url/3d877f4e40e2ec56a9c76a778cae62c29692be3fa7eaf0393745b123107b2086)).
+  This checks the link and its host, *not* the contents of the file.
+- **Full file scan - not run yet.** The exe is 72 MB, and VirusTotal only analyses a file's contents
+  when someone uploads the file itself. To add it: upload `GamingStackGUI.exe` at
+  <https://www.virustotal.com/gui/home/upload> (or add a free VirusTotal API key as a repository secret
+  named `VT_API_KEY` - the release workflow then scans every tagged release automatically and writes
+  the report link into the release notes). The file report is at
+  `https://www.virustotal.com/gui/file/<the SHA-256 above>` once it exists.
 
 **Please read this honestly:** a self-contained single-file .NET program that asks for administrator
 rights, installs software and changes settings can look "suspicious" to some antivirus engines even

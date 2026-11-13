@@ -10,6 +10,17 @@ Everything below `0.6.2` predates versioning entirely, so those entries are
 backfilled from the original milestone-based changelog and given version
 numbers retroactively - there's no real date for them, only relative order.
 
+## [1.6.1] - Automatic VirusTotal scan of releases, clearer notes on where files are saved
+
+### Changed
+- Release workflow scans the published exe with VirusTotal (needs the `VT_API_KEY` repository secret) and
+  never blocks a release if the scan service is down.
+- README and wiki explain that logs and undo scripts go to the user's own Documents folder (wherever
+  Windows keeps it, including OneDrive), whatever folder the exe is run from.
+- SECURITY.md records the scan of the app's compiled code (0 of 68).
+
+No change to the program's behaviour.
+
 ## [1.6.0] - Full logging, a final check before anything changes, 70 more apps, download links
 
 ### Added

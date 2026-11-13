@@ -12,7 +12,7 @@ maximum nostalgia.
 The project uses [Semantic Versioning](https://semver.org/), tracked in
 `GamingStackGUI.csproj` (`<Version>`/`<AssemblyVersion>`/`<FileVersion>`)
 and mirrored as a `## [x.y.z] - ...` heading at the top of `CHANGELOG.md`.
-The project is at **1.6.0**. Rules for bumping (they were written under
+The project is at **1.6.1**. Rules for bumping (they were written under
 `0.y.z` and still apply the same way):
 - **Bump the minor version** (`0.6.x` → `0.7.0`) for a change that adds a
   feature - a new wizard behavior, a new catalog category, a new stage.

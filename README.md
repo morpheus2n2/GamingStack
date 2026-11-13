@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 ![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-blue)
 ![.NET](https://img.shields.io/badge/.NET-8.0-purple)
-[![Version](https://img.shields.io/badge/version-1.6.0-brightgreen.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.6.1-brightgreen.svg)](CHANGELOG.md)
 [![Release](https://img.shields.io/github/v/release/morpheus2n2/GamingStack)](https://github.com/morpheus2n2/GamingStack/releases)
 [![Security](https://img.shields.io/badge/security-scan%20results-informational)](SECURITY.md)
 
@@ -170,7 +170,7 @@ dotnet publish -c Release -r win-x64        # one self-contained GamingStackGUI.
 ```
 
 Needs the [.NET 8 SDK](https://dotnet.microsoft.com/download) on Windows. The published exe is in
-`bin/Release/net8.0-windows/win-x64/publish/`. Tagging a version (`v1.6.0`) builds and attaches the
+`bin/Release/net8.0-windows/win-x64/publish/`. Tagging a version (`v1.6.1`) builds and attaches the
 exe to a GitHub Release automatically. `python tools/gen-catalog.py` regenerates the catalog page.
 
 Project rules and architecture notes are in [CLAUDE.md](CLAUDE.md) - read it before changing

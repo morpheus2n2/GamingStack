@@ -10,9 +10,9 @@
 
     <!-- Bump this alongside CHANGELOG.md - see "Versioning" in CLAUDE.md for the
          minor-vs-patch rule. Shows up in the built exe's file properties. -->
-    <Version>1.6.0</Version>
-    <AssemblyVersion>1.6.0.0</AssemblyVersion>
-    <FileVersion>1.6.0.0</FileVersion>
+    <Version>1.6.1</Version>
+    <AssemblyVersion>1.6.1.0</AssemblyVersion>
+    <FileVersion>1.6.1.0</FileVersion>
 
     <!-- Debug uses asInvoker so `dotnet run`/F5 debugging works without hitting
          "the requested operation requires elevation" (CreateProcess can't silently

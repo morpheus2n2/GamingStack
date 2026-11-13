@@ -1,25 +1,17 @@
-using System;
-using System.Collections.Generic;
 using System.Diagnostics;
-using System.Drawing;
-using System.Drawing.Drawing2D;
-using System.IO;
-using System.Linq;
 using System.Management;
 using System.Media;
-using System.Reflection;
-using System.Threading.Tasks;
-using System.Windows.Forms;
 
 namespace GamingStackGUI
 {
     /// <summary>
-    /// Flow: Bios -> Boot (original animation) -> Desktop (placeholder) -> Terminal
-    /// (interactive install wizard, then the real installer, via InstallerEngine).
+    /// Flow: Bios -> Boot (original animation) -> Desktop (a small retro "OS": windows,
+    /// Start menu, icons, apps) -> Terminal (the installer wizard window, then the real
+    /// installer, via InstallerEngine). The class is split across MainForm*.cs files by topic.
     /// Pressing Delete during the Bios stage detours into a joke Bsod stage for a few
     /// seconds, then carries on into Boot as normal.
     /// </summary>
-    public class MainForm : Form
+    public partial class MainForm : Form
     {
         private enum Stage { Bios, Bsod, Boot, Desktop, Terminal }
 
@@ -27,6 +19,7 @@ namespace GamingStackGUI
         // install run. See HandleWizardKey for the full flow between these.
         private enum WizardPhase
         {
+            ChooseProfile,       // "[1] Gaming [2] Office [3] Developer" - the very first screen
             ConfirmAll,          // "Install everything shown? Y/N"
             ChooseIndividually,  // "Want to choose what's installed? Y/N"
             PerApp,              // asking Y/N for one catalog entry at a time
@@ -43,6 +36,13 @@ namespace GamingStackGUI
             ChoosePowerPlan,     // "[1] High performance [2] Ultimate Performance" -
                                  // shown once, right before ConfirmTweaks, since the
                                  // power plan tweak needs to know which one to preview
+            ChooseDns,           // "[1] Keep mine [2] Cloudflare [3] Google [4] Quad9" -
+                                 // optional DNS switch, defaults to leaving it alone
+            ChooseDebloat,       // tick/untick preinstalled Store apps to remove; only
+                                 // shown if the scan found any. Nothing ticked by default.
+            Credits,             // short scrolling credits, between Summary and ShuttingDown
+            FinalReview,         // the point of no return: everything that is about to happen, in one
+                                 // list. Needs the word GO typed and Enter - not just a single key.
             ConfirmTweaks,       // "Apply these tweaks? Y/N" - shown once app
                                  // selection is finalized, before Installing. Never
                                  // skipped: tweaks only ever run after an explicit yes.
@@ -63,7 +63,6 @@ namespace GamingStackGUI
         private const int DesktopHoldMs = 7000;
         private const int TerminalOpenMs = 400;
         private const int EasterEggHoldMs = 5000;
-        private const double CloudSpeedMultiplier = 1.8;
         private const long SpeedrunThresholdMs = 90000; // "Speedrunner" achievement cutoff
 
         private readonly System.Windows.Forms.Timer _timer = new() { Interval = 33 };
@@ -91,34 +90,30 @@ namespace GamingStackGUI
 
         private bool _soundFired;
         private SoundPlayer? _soundPlayer;
-        private Image? _wallpaper;
+        private Bitmap? _wallpaper;   // the pixel-art desk scene, screen-sized
 
-        // ---- boot animation sprites ----
-        // Hand-authored, low-resolution pixel-art PNGs (see Resources/) drawn with
-        // NearestNeighbor scaling so upscaling them for a fullscreen boot animation
-        // keeps the chunky, blocky look rather than smoothing it into a blur. The
-        // flag is a sprite-sheet of pre-baked wave frames rather than a live
-        // per-pixel simulation, same as a real retro sprite animation would be.
-        private Image? _cloudSprite;
-        private Image? _sunSprite;
-        private Image? _hillsSprite;
-        private Image? _flagSheet;
-        private const int FlagFrameWidth = 48;
-        private const int FlagFrameHeight = 28;
-        private const int FlagFrameCount = 16;
-        private const double FlagFramesPerSecond = 10.0;
+        // The boot artwork (sky, mountains, clouds, flag) is drawn procedurally by
+        // BootScene at low resolution and scaled up - no image files involved.
+        private BootScene? _bootScene;
 
-        private readonly Font _mono = new("Consolas", 14f, FontStyle.Regular);
-        private readonly Font _monoSmall = new("Consolas", 12f, FontStyle.Regular);
-        private readonly Font _headingFont = new("Consolas", 12f, FontStyle.Bold | FontStyle.Underline);
-        private readonly Font _monoLarge = new("Consolas", 22f, FontStyle.Bold);
+        private readonly Font _mono = Ui.Font(14f, FontStyle.Regular);
+        private readonly Font _monoSmall = Ui.Font(12f, FontStyle.Regular);
+        private readonly Font _monoTiny = Ui.Font(10f, FontStyle.Regular);              // used when the app list is tight
+        private readonly Font _headingTiny = Ui.Font(10f, FontStyle.Bold | FontStyle.Underline);
+        private readonly Font _headingFont = Ui.Font(12f, FontStyle.Bold | FontStyle.Underline);
+        private readonly Font _monoLarge = Ui.Font(22f, FontStyle.Bold);
 
         // ---- installer + wizard ----
         private readonly InstallerEngine _installer = new();
         private readonly List<string> _terminalLines = new();
         private readonly object _terminalLock = new();
 
-        private WizardPhase _wizardPhase = WizardPhase.ConfirmAll;
+        private WizardPhase _wizardPhase = WizardPhase.ChooseProfile;
+        // Chosen on the first wizard screen; decides the catalog and which tweaks apply.
+        private SetupProfile _profile = SetupProfile.Gaming;
+        private List<AppEntry> _catalog = InstallerEngine.CatalogFor(SetupProfile.Gaming);
+        // Stopwatch time at which the app list starts typing (reset when a profile is chosen).
+        private long _typingStartMs = TerminalOpenMs;
         private readonly List<AppEntry> _selectedApps = new();
         private int _perAppIndex;
         private bool?[] _perAppDecisions = Array.Empty<bool?>();
@@ -130,10 +125,20 @@ namespace GamingStackGUI
         // ApplyTweaks() in InstallerEngine never runs without it being true.
         private List<InstallerEngine.TweakPreview> _tweakPreview = new();
         private bool _applyTweaks;
+        private string _finalTyped = "";   // what has been typed on the FinalReview screen so far
         // Answered once on the ChoosePowerPlan screen, right before ConfirmTweaks -
         // defaults to High (the safe, always-available choice) so a bug in wiring the
         // ChoosePowerPlan phase in can never silently end up on Ultimate.
         private InstallerEngine.PowerPlanChoice _powerPlanChoice = InstallerEngine.PowerPlanChoice.High;
+        // DNS switch: Skip unless the user picks a provider on the ChooseDns screen.
+        private DnsChoice _dnsChoice = DnsChoice.Skip;
+        private string? _buildSheetPath;
+        // Debloat: what the scan found installed, and which of those the user ticked.
+        // Starts empty (nothing is removed unless explicitly ticked).
+        private IReadOnlyList<DebloatItem> _debloatOffered = Array.Empty<DebloatItem>();
+        private readonly HashSet<string> _debloatTicked = new();
+        private TweakOptions CurrentTweakOptions =>
+            new(_powerPlanChoice, _dnsChoice, _debloatTicked.ToList(), _profile);
 
         // ---- restore point + optional full image backup ----
         // The restore point always runs, no consent screen needed for it (see
@@ -153,112 +158,6 @@ namespace GamingStackGUI
         // parsing the free-text terminal log.
         private readonly List<ItemResult> _itemResults = new();
         private readonly object _itemResultLock = new();
-
-        // ---- achievement toasts ----
-        // Unlock conditions are checked from wherever they naturally happen (the
-        // installer's background task via OnItemResult/OnFinished, or the wizard's UI
-        // thread for choice-based ones like Completionist), so the queue and the
-        // fired-set are guarded by their own lock. _currentToast/_toastWatch are only
-        // ever touched from Advance()/Paint on the UI thread, so they don't need it.
-        private readonly record struct Achievement(string Id, string Title, string Subtitle);
-
-        // Single source of truth for every achievement - both UnlockAchievement (by id)
-        // and the summary screen's tracker (which needs to list every achievement,
-        // locked or not) read from this instead of each call site repeating its own
-        // copy of the title/subtitle text.
-        private static readonly Achievement[] AllAchievements =
-        {
-            new("first_blood", "First Blood", "Your first successful install this run."),
-            new("completionist", "Completionist", "Going for the whole catalog, nothing held back."),
-            new("redistributable_rampage", "Redistributable Rampage", "Every VC++ runtime, handled in one go."),
-            new("already_perfect", "Already Perfect", "Something on this PC didn't need our help."),
-            new("not_meant_to_be", "Not Everything's Meant To Be", "Something didn't make it - check the summary for why."),
-            new("speedrunner", "Speedrunner", "Full install finished in under 90 seconds."),
-        };
-
-        private readonly HashSet<string> _achievementsFired = new();
-        private readonly Queue<Achievement> _pendingToasts = new();
-        private readonly object _achievementLock = new();
-        private Achievement? _currentToast;
-        private readonly Stopwatch _toastWatch = new();
-
-        private const int ToastSlideInMs = 250;
-        private const int ToastHoldMs = 2200;
-        private const int ToastFadeOutMs = 400;
-        private const int ToastTotalMs = ToastSlideInMs + ToastHoldMs + ToastFadeOutMs;
-
-        private void UnlockAchievement(string id)
-        {
-            var index = Array.FindIndex(AllAchievements, a => a.Id == id);
-            if (index < 0) return; // unknown id - shouldn't happen, just don't crash over it
-
-            lock (_achievementLock)
-            {
-                if (!_achievementsFired.Add(id)) return; // already unlocked this run
-                _pendingToasts.Enqueue(AllAchievements[index]);
-            }
-        }
-
-        // Deliberately separate from UnlockAchievement/AllAchievements - the Konami
-        // code's toast is a genuine hidden surprise, so it must never appear in (or
-        // inflate the count on) the Summary screen's achievement tracker, which only
-        // ever enumerates AllAchievements. Still routes through the same fired-set
-        // guard (keyed with a "secret_" prefix so it can't collide with a real id)
-        // so mashing the code twice in one run doesn't queue a second toast.
-        private void UnlockSecretAchievement(string id, string title, string subtitle)
-        {
-            lock (_achievementLock)
-            {
-                if (!_achievementsFired.Add("secret_" + id)) return;
-                _pendingToasts.Enqueue(new Achievement(id, title, subtitle));
-            }
-        }
-
-        // ---- Konami code easter egg ----
-        // The only hint anywhere in the app is the disguised BIOS POST line in
-        // BuildBiosTimeline(). Checked on every keypress regardless of _stage, so it
-        // works whether you're staring at the BIOS screen, the boot animation, the
-        // desktop, or the terminal wizard.
-        private static readonly Keys[] KonamiSequence =
-        {
-            Keys.Up, Keys.Up, Keys.Down, Keys.Down,
-            Keys.Left, Keys.Right, Keys.Left, Keys.Right,
-            Keys.B, Keys.A,
-        };
-        private int _konamiProgress;
-
-        private void CheckKonamiCode(Keys key)
-        {
-            if (key == KonamiSequence[_konamiProgress])
-            {
-                _konamiProgress++;
-                if (_konamiProgress == KonamiSequence.Length)
-                {
-                    _konamiProgress = 0;
-                    UnlockSecretAchievement("konami", "Cheat Code Accepted",
-                        "Konami code entered. It doesn't do anything - but you found it.");
-                }
-            }
-            else
-            {
-                // Restart the match, but allow the failed keypress to itself be a
-                // valid restart of the sequence (e.g. two Ups in a row shouldn't
-                // dead-end the whole thing).
-                _konamiProgress = key == KonamiSequence[0] ? 1 : 0;
-            }
-        }
-
-        // ---- terminal window: draggable/resizable ----
-        // Null until PaintTerminal first runs, which seeds these from the original
-        // fixed 0.7/0.62-of-screen defaults; from then on dragging/resizing just
-        // mutates these directly instead of recomputing from Width/Height every frame.
-        private int? _termX, _termY, _termW, _termH;
-        private bool _draggingTerm, _resizingTerm;
-        private Point _dragMouseStart;
-        private Rectangle _dragTermStart;
-        private const int TermResizeGrip = 18;
-        private const int TermMinWidth = 480;
-        private const int TermMinHeight = 280;
 
         // Sized from the actual title font metrics (+8px padding) rather than a guessed
         // constant, so the bar is always at least a few px taller than the text it
@@ -325,6 +224,13 @@ namespace GamingStackGUI
                 if (_selectedApps.Count > 0 && _phaseWatch.ElapsedMilliseconds < SpeedrunThresholdMs)
                     UnlockAchievement("speedrunner");
 
+                ItemResult[] finalResults;
+                lock (_itemResultLock) { finalResults = _itemResults.ToArray(); }
+                ProgressStore.AddInstalled(finalResults.Count(r => r.Kind == InstallResultKind.Installed));
+                _buildSheetPath = BuildSheet.Write(finalResults, _installer.TweaksApplied,
+                    _installer.TweaksRevertFilePath, _installer.LogFilePath, _dnsChoice,
+                    _applyTweaks ? _debloatTicked.Count : 0, SetupProfileInfo.Title(_profile));
+
                 if (_backupTiming == BackupTiming.After && _backupDrive != null)
                 {
                     _wizardPhase = WizardPhase.RunningBackup;
@@ -364,397 +270,46 @@ namespace GamingStackGUI
             TopMost = true;
 
             LoadEmbeddedSound();
-            LoadTypewriterTickSound();
-            LoadEmbeddedWallpaper();
-            LoadBootSprites();
+            LoadWallpaper();
             BuildBiosTimeline();
+            if (ProgressStore.StartSession()) UnlockAchievement("welcome_back");
+            if (ProgressStore.Streak >= 3) UnlockAchievement("on_a_roll");
+            if (ProgressStore.Runs >= 7) UnlockAchievement("regular");
             _stageWatch.Restart();
             _timer.Start();
         }
 
-        // ---------- embedded assets ----------
-
-        private static Stream? FindEmbeddedResource(string suffix)
-        {
-            var asm = Assembly.GetExecutingAssembly();
-            var name = asm.GetManifestResourceNames()
-                .FirstOrDefault(n => n.EndsWith(suffix, StringComparison.OrdinalIgnoreCase));
-            return name == null ? null : asm.GetManifestResourceStream(name);
-        }
-
-        private void LoadEmbeddedSound()
-        {
-            try
-            {
-                using var stream = FindEmbeddedResource("win95.wav");
-                if (stream == null) return;
-
-                // SoundPlayer needs to own a seekable stream for the lifetime of playback,
-                // so copy it out of the resource stream rather than holding that one open.
-                var ms = new MemoryStream();
-                stream.CopyTo(ms);
-                ms.Position = 0;
-                _soundPlayer = new SoundPlayer(ms);
-                _soundPlayer.Load();
-            }
-            catch
-            {
-                // Non-fatal - the boot animation still runs, just without sound.
-            }
-        }
-
-        // Synthesized rather than an embedded .wav - cheaper (and one less binary
-        // asset to ship) to generate a tiny PCM WAV in memory than to source/record a
-        // real sample. A real typewriter/RE-save-point "clack" isn't one tone - it's
-        // three layered pieces happening in the first ~50ms: a very brief broadband
-        // strike (the key hitting the platen), a short high metallic tick (the type-bar
-        // itself), and a low-mid wooden/mechanical body resonance that carries the
-        // actual "clack" pitch and rings out longest. Mixing all three, each with its
-        // own short decay, is what makes it read as a mechanical object being struck
-        // rather than a beep or a single click.
-        private static byte[] GenerateTypewriterTickWav(int variantSeed)
-        {
-            const int sampleRate = 44100;
-            const double totalDurationSec = 0.055;
-            var sampleCount = (int)(sampleRate * totalDurationSec);
-
-            // Small per-variant jitter, so the handful of pre-rendered variants sound
-            // like the same typewriter struck slightly differently - not a robotically
-            // identical loop, but not a randomly different instrument each time either.
-            var rand = new Random(variantSeed);
-            var bodyFreq1 = 185 + rand.NextDouble() * 25;
-            var bodyFreq2 = 330 + rand.NextDouble() * 40;
-            var clickFreq = 3000 + rand.NextDouble() * 800;
-
-            var samples = new double[sampleCount];
-            for (int i = 0; i < sampleCount; i++)
-            {
-                var t = i / (double)sampleRate;
-
-                // 1) Initial broadband strike - raw noise, gone in ~2ms.
-                var strikeEnv = Math.Exp(-t / 0.0012);
-                var strike = (rand.NextDouble() * 2 - 1) * strikeEnv;
-
-                // 2) High metallic "tick" from the type-bar itself - brief and bright.
-                var clickEnv = Math.Exp(-t / 0.004);
-                var click = Math.Sin(2 * Math.PI * clickFreq * t) * clickEnv;
-
-                // 3) Low-mid mechanical body resonance - the actual "clack" tone,
-                // decaying over most of the clip's length.
-                var bodyEnv = Math.Exp(-t / 0.018);
-                var body = (Math.Sin(2 * Math.PI * bodyFreq1 * t) * 0.7 +
-                            Math.Sin(2 * Math.PI * bodyFreq2 * t) * 0.3) * bodyEnv;
-
-                samples[i] = strike * 0.45 + click * 0.3 + body * 0.6;
-            }
-
-            // Normalize so mixing the three layers never clips/distorts.
-            var peak = samples.Select(Math.Abs).DefaultIfEmpty(0).Max();
-            var scale = peak > 0 ? 0.9 / peak : 1.0;
-
-            var pcm = new short[sampleCount];
-            for (int i = 0; i < sampleCount; i++)
-                pcm[i] = (short)(samples[i] * scale * short.MaxValue);
-
-            using var ms = new MemoryStream();
-            using (var writer = new BinaryWriter(ms, System.Text.Encoding.ASCII, leaveOpen: true))
-            {
-                var dataSize = pcm.Length * 2;
-                writer.Write(System.Text.Encoding.ASCII.GetBytes("RIFF"));
-                writer.Write(36 + dataSize);
-                writer.Write(System.Text.Encoding.ASCII.GetBytes("WAVE"));
-                writer.Write(System.Text.Encoding.ASCII.GetBytes("fmt "));
-                writer.Write(16);
-                writer.Write((short)1);  // PCM
-                writer.Write((short)1);  // mono
-                writer.Write(sampleRate);
-                writer.Write(sampleRate * 2); // byte rate (sampleRate * blockAlign)
-                writer.Write((short)2);  // block align
-                writer.Write((short)16); // bits per sample
-                writer.Write(System.Text.Encoding.ASCII.GetBytes("data"));
-                writer.Write(dataSize);
-                foreach (var s in pcm) writer.Write(s);
-            }
-            return ms.ToArray();
-        }
-
-        // A small pool of pre-rendered variants, cycled round-robin, rather than one
-        // shared SoundPlayer: rapid typing retriggers the sound faster than one clip's
-        // tail finishes, and reusing a single SoundPlayer for that cuts the previous
-        // hit off abruptly. Separate instances let consecutive ticks overlap/ring
-        // naturally, and the slight per-variant pitch difference keeps a fast burst
-        // from sounding like a single tone stuttering.
-        private readonly SoundPlayer?[] _typewriterTickPlayers = new SoundPlayer?[4];
-        private int _typewriterTickIndex;
-
-        private void LoadTypewriterTickSound()
-        {
-            for (int v = 0; v < _typewriterTickPlayers.Length; v++)
-            {
-                try
-                {
-                    var ms = new MemoryStream(GenerateTypewriterTickWav(1000 + v));
-                    var player = new SoundPlayer(ms);
-                    player.Load();
-                    _typewriterTickPlayers[v] = player;
-                }
-                catch
-                {
-                    // Non-fatal - that slot just stays silent, others still play.
-                }
-            }
-        }
-
-        private void PlayTypewriterTick()
-        {
-            try
-            {
-                var player = _typewriterTickPlayers[_typewriterTickIndex];
-                _typewriterTickIndex = (_typewriterTickIndex + 1) % _typewriterTickPlayers.Length;
-                player?.Play();
-            }
-            catch { /* non-fatal */ }
-        }
-
-        private void LoadEmbeddedWallpaper()
-        {
-            try
-            {
-                using var stream = FindEmbeddedResource("wallpaper.jpg");
-                if (stream == null) return;
-
-                var ms = new MemoryStream();
-                stream.CopyTo(ms);
-                ms.Position = 0;
-                _wallpaper = Image.FromStream(ms);
-            }
-            catch
-            {
-                // Non-fatal - falls back to the placeholder fill.
-            }
-        }
-
-        private static Image? LoadEmbeddedImage(string suffix)
-        {
-            using var stream = FindEmbeddedResource(suffix);
-            if (stream == null) return null;
-
-            var ms = new MemoryStream();
-            stream.CopyTo(ms);
-            ms.Position = 0;
-            return Image.FromStream(ms);
-        }
-
-        private void LoadBootSprites()
-        {
-            try
-            {
-                _cloudSprite = LoadEmbeddedImage("cloud.png");
-                _sunSprite = LoadEmbeddedImage("sun.png");
-                _hillsSprite = LoadEmbeddedImage("hills.png");
-                _flagSheet = LoadEmbeddedImage("flag_sheet.png");
-            }
-            catch
-            {
-                // Non-fatal - PaintBoot falls back to procedural shapes for anything
-                // that didn't load.
-            }
-        }
-
-        private static void PlayBeepAsync(int freq, int durationMs)
-        {
-            Task.Run(() =>
-            {
-                try { Console.Beep(freq, durationMs); }
-                catch { /* no speaker / unsupported - non-fatal */ }
-            });
-        }
-
-        // ---------- fake BIOS timeline (real hardware) ----------
-
-        private void BuildBiosTimeline()
-        {
-            _timedLines.Clear();
-
-            void Add(long at, string text, Color color) =>
-                _timedLines.Add(new TimedLine { At = at, Text = text, Color = color });
-
-            Add(0, "American Megatrends Inc.", Color.Gainsboro);
-            Add(150, "GAMINGSTACK-UEFI BIOS v2.1.0", Color.Gray);
-
-            var board = GetMotherboard();
-            Add(700, $"Mainboard: {board}", Color.Gainsboro);
-
-            var cpu = GetWmiString("Win32_Processor", "Name");
-            Add(1200, $"CPU: {cpu}", Color.Gainsboro);
-            Add(1700, "CPU: OK", Color.LightGreen);
-
-            Add(2300, "Memory Test:", Color.Gainsboro);
-            _memCountAt = 2600;
-            _targetRamGb = GetTotalRamGb();
-            var memCountEndAt = _memCountAt + MemCountDurationMs;
-
-            var afterMem = memCountEndAt + 400;
-            Add(afterMem, "Graphics Adapter:", Color.Gainsboro);
-            var gpu = GetWmiString("Win32_VideoController", "Name");
-            Add(afterMem + 400, $"  {gpu} - OK", Color.LightGreen);
-
-            var disksStart = afterMem + 900;
-            Add(disksStart, "Storage Devices:", Color.Gainsboro);
-            long diskCursor = disksStart + 300;
-            foreach (var disk in GetDisks())
-            {
-                Add(diskCursor, $"  {disk}", Color.LightGreen);
-                diskCursor += 300;
-            }
-
-            // Read-only reporting, not a tweak - no consent screen needed, same as
-            // the disk list above it. Sits here rather than on ConfirmTweaks since
-            // nothing changes; it's just telling you what's already true.
-            var trim = GetTrimStatus();
-            Add(diskCursor, $"  TRIM (delete notify): {trim}", trim == "enabled" ? Color.LightGreen : Color.Gold);
-            diskCursor += 300;
-
-            // Its own heading (matching the Graphics Adapter/Storage Devices pattern
-            // above) rather than tacking onto the disk list - it was reading as just
-            // another storage entry before. Disguised as an ordinary peripheral
-            // detection line either way - this is the Konami code's only hint
-            // anywhere in the app, hidden in plain sight during POST.
-            Add(diskCursor, "Input Devices:", Color.Gainsboro);
-            Add(diskCursor + 300, "  Standard 104-Key Keyboard (↑↑↓↓←→←→BA) - OK", Color.LightGreen);
-            diskCursor += 600;
-
-            // Not added to the timed reveal - the "Press DEL" prompt is drawn separately
-            // in PaintBios, pinned to the bottom of the screen and visible from frame
-            // one. _footerAt is still used to time the footer beep below.
-            _footerAt = diskCursor + 400;
-        }
-
-        private static string GetMotherboard()
-        {
-            var manufacturer = GetWmiString("Win32_BaseBoard", "Manufacturer");
-            var product = GetWmiString("Win32_BaseBoard", "Product");
-
-            if (manufacturer == "Unknown" && product == "Unknown") return "Unknown";
-            if (manufacturer == "Unknown") return product;
-            if (product == "Unknown") return manufacturer;
-
-            // Some boards report the manufacturer name as part of Product already
-            // (e.g. "ASUSTeK COMPUTER INC." + "ROG STRIX Z790-E") - avoid a stutter
-            // like "ASUSTeK COMPUTER INC. ASUSTeK COMPUTER INC. ROG STRIX Z790-E".
-            return product.Contains(manufacturer, StringComparison.OrdinalIgnoreCase)
-                ? product
-                : $"{manufacturer} {product}";
-        }
-
-        private static string GetWmiString(string wmiClass, string property)
-        {
-            try
-            {
-                using var searcher = new ManagementObjectSearcher($"SELECT {property} FROM {wmiClass}");
-                foreach (var obj in searcher.Get())
-                    return obj[property]?.ToString()?.Trim() ?? "Unknown";
-            }
-            catch
-            {
-                // Ignored - falls through to "Unknown" below.
-            }
-            return "Unknown";
-        }
-
-        private static long GetTotalRamGb()
-        {
-            try
-            {
-                using var searcher = new ManagementObjectSearcher(
-                    "SELECT TotalPhysicalMemory FROM Win32_ComputerSystem");
-                foreach (var obj in searcher.Get())
-                {
-                    var bytes = Convert.ToInt64(obj["TotalPhysicalMemory"]);
-                    return (long)Math.Round(bytes / 1024.0 / 1024.0 / 1024.0);
-                }
-            }
-            catch
-            {
-                // Ignored - falls through to 0 below.
-            }
-            return 0;
-        }
-
-        private static IEnumerable<string> GetDisks()
-        {
-            var results = new List<string>();
-            try
-            {
-                // Status is real WMI health data (usually "OK"; a failing drive
-                // reports something else, e.g. "Pred Fail") rather than a hardcoded
-                // "OK" - this is the read-only storage health half of the NVMe
-                // TRIM/storage health check idea from ROADMAP.md.
-                using var searcher = new ManagementObjectSearcher("SELECT Model, Size, Status FROM Win32_DiskDrive");
-                foreach (var obj in searcher.Get())
-                {
-                    var model = obj["Model"]?.ToString() ?? "Unknown Disk";
-                    var sizeGb = obj["Size"] != null
-                        ? (long)Math.Round(Convert.ToInt64(obj["Size"]) / 1024.0 / 1024.0 / 1024.0)
-                        : 0;
-                    var status = obj["Status"]?.ToString();
-                    results.Add($"{model} - {sizeGb}GB - {(string.IsNullOrWhiteSpace(status) ? "OK" : status)}");
-                }
-            }
-            catch
-            {
-                // Ignored - falls through to the fallback line below.
-            }
-            if (results.Count == 0) results.Add("Unknown Disk - OK");
-            return results;
-        }
-
-        /// <summary>
-        /// Whether NTFS delete notify (TRIM) is enabled system-wide - read via
-        /// `fsutil behavior query DisableDeleteNotify`, the standard, documented way
-        /// to check this (there's no WMI class for it). This is read-only reporting,
-        /// not a tweak: nothing here changes anything, so it has no consent screen
-        /// and doesn't go through InstallerEngine's tweak pattern.
-        /// </summary>
-        private static string GetTrimStatus()
-        {
-            try
-            {
-                var psi = new ProcessStartInfo("fsutil", "behavior query DisableDeleteNotify")
-                {
-                    UseShellExecute = false,
-                    RedirectStandardOutput = true,
-                    CreateNoWindow = true
-                };
-                using var p = Process.Start(psi);
-                if (p == null) return "unknown";
-                var output = p.StandardOutput.ReadToEnd();
-                p.WaitForExit(3000);
-
-                var match = System.Text.RegularExpressions.Regex.Match(output, @"DisableDeleteNotify\s*=\s*(\d)");
-                if (!match.Success) return "unknown";
-                return match.Groups[1].Value == "0" ? "enabled" : "disabled";
-            }
-            catch
-            {
-                return "unknown";
-            }
-        }
-
         // ---------- stage progression ----------
+
+        private long _lastWindowTick = Environment.TickCount64;
 
         private void Advance()
         {
+            var nowTick = Environment.TickCount64;
+            TickWindows(nowTick - _lastWindowTick);
+            _lastWindowTick = nowTick;
+            UpdateToasts();
+            CheckScreensaver();
+
             switch (_stage)
             {
                 case Stage.Bios:
                     var elapsed = _stageWatch.ElapsedMilliseconds;
                     var memCountEndAt = _memCountAt + MemCountDurationMs;
 
-                    if (!_postBeepPlayed)
+                    // Sounds go through the software mixer (RetroAudio), so they play on any
+                    // sound card - Console.Beep needs a motherboard speaker most PCs lack.
+                    if (!_postBeepPlayed && elapsed >= 250)
                     {
                         _postBeepPlayed = true;
-                        PlayBeepAsync(600, 120);
+                        PlayBios(a => a.SpinUp());
+                    }
+
+                    // Little drive-seek clicks while the BIOS "detects" things.
+                    if (elapsed >= 900 && elapsed < memCountEndAt && elapsed - _lastSeekAt >= 650)
+                    {
+                        _lastSeekAt = elapsed + _typeRng.Next(0, 500);
+                        PlayBios(a => a.Seek());
                     }
 
                     if (elapsed >= _memCountAt && elapsed < memCountEndAt)
@@ -762,19 +317,19 @@ namespace GamingStackGUI
                         if (elapsed - _lastMemBeepAt >= 180)
                         {
                             _lastMemBeepAt = elapsed;
-                            PlayBeepAsync(1200, 25);
+                            PlayBios(a => a.MemTick());
                         }
                     }
                     else if (elapsed >= memCountEndAt && !_memBeepDone)
                     {
                         _memBeepDone = true;
-                        PlayBeepAsync(800, 150);
+                        PlayBios(a => a.DoneBeep());
                     }
 
                     if (elapsed >= _footerAt && !_footerBeepPlayed)
                     {
                         _footerBeepPlayed = true;
-                        PlayBeepAsync(900, 80);
+                        PlayBios(a => a.PostBeep());   // the classic single "all OK" beep
                     }
 
                     var holdTarget = Math.Max(BiosMinHoldMs, _footerAt + 300);
@@ -810,50 +365,37 @@ namespace GamingStackGUI
                     break;
 
                 case Stage.Desktop:
-                    if (_stageWatch.ElapsedMilliseconds >= DesktopHoldMs)
-                    {
-                        _stage = Stage.Terminal;
-                        _stageWatch.Restart();
-                    }
+                    // After a few seconds the installer opens by itself - unless you have
+                    // already opened something else to play with, in which case it waits
+                    // for you (Start menu, the Gaming/Office/Developer icons, or SPACE).
+                    if (_stageWatch.ElapsedMilliseconds >= DesktopHoldMs && _windows.Count == 0)
+                        EnterTerminalStage();
                     break;
 
                 case Stage.Terminal:
-                    // Achievement toast queue: pop the next one once nothing's showing,
-                    // and clear the current one once its total on-screen time is up.
-                    // Runs regardless of wizard phase - an achievement can unlock mid-
-                    // wizard (Completionist) or mid-install alike.
-                    if (_currentToast == null)
-                    {
-                        Achievement? next = null;
-                        lock (_achievementLock)
-                        {
-                            if (_pendingToasts.Count > 0) next = _pendingToasts.Dequeue();
-                        }
-                        if (next != null)
-                        {
-                            _currentToast = next;
-                            _toastWatch.Restart();
-                        }
-                    }
-                    else if (_toastWatch.ElapsedMilliseconds >= ToastTotalMs)
-                    {
-                        _currentToast = null;
-                    }
 
-                    // Typewriter tick: mirrors DrawWizard's own typedBudget calculation
-                    // (see WizardTypeCharsPerSecond) just to know whether new characters
-                    // appeared since the last tick, ~30 times/sec off the timer interval
-                    // - close enough to per-character to read as rapid typewriter
-                    // clatter without spamming overlapping sound playback.
+                    // Typewriter sound: works out how many new characters appeared since
+                    // the last tick (same maths as DrawWizard's reveal) and plays one key
+                    // clack per ~2 letters, spread across the frame so a fast burst
+                    // sounds like a rattle of separate keys rather than one smear. A bell
+                    // rings once when the whole list has finished typing out.
                     if (IsWizardTypingPhase(_wizardPhase))
                     {
-                        var typingElapsedMs = Math.Max(0, _stageWatch.ElapsedMilliseconds - TerminalOpenMs);
+                        var typingElapsedMs = Math.Max(0, _stageWatch.ElapsedMilliseconds - _typingStartMs);
                         var typedBudget = (int)(typingElapsedMs / 1000.0 * WizardTypeCharsPerSecond);
-                        var clamped = Math.Min(typedBudget, GetWizardTotalChars());
+                        var total = GetWizardTotalChars();
+                        var clamped = Math.Min(typedBudget, total);
                         if (clamped > _wizardCharsRevealed)
                         {
+                            var newChars = clamped - _wizardCharsRevealed;
                             _wizardCharsRevealed = clamped;
-                            PlayTypewriterTick();
+                            var heard = _windows.Any(w => w.Id == "installer" && !w.Minimized);   // silent if the window is closed or minimised
+                            if (heard) PlayTypewriterKeys(newChars);
+                            if (clamped >= total && !_typewriterBellRung)
+                            {
+                                _typewriterBellRung = true;
+                                if (heard) _audio?.Bell();
+                            }
                         }
                     }
 
@@ -864,249 +406,19 @@ namespace GamingStackGUI
                         _phaseWatch.Restart();
                     }
 
+                    if (_wizardPhase == WizardPhase.Credits &&
+                        _phaseWatch.ElapsedMilliseconds >= CreditsAutoAdvanceMs)
+                    {
+                        _wizardPhase = WizardPhase.ShuttingDown;
+                        _phaseWatch.Restart();
+                    }
+
                     // The shutdown outro is a beat, not a question - it plays itself
                     // out and moves on to Farewell on its own, no keypress needed.
                     if (_wizardPhase == WizardPhase.ShuttingDown &&
                         _phaseWatch.ElapsedMilliseconds >= ShutdownAutoAdvanceMs)
                     {
                         _wizardPhase = WizardPhase.Farewell;
-                        _phaseWatch.Restart();
-                    }
-                    break;
-            }
-        }
-
-        // ---------- install wizard ----------
-
-        // Reads the real current value of every tweak (via InstallerEngine.PreviewTweaks -
-        // a pure read, nothing changes here) and shows the consent screen built from
-        // it. Reached only from ChoosePowerPlan, so the power-plan tweak's preview
-        // already knows which plan to show as the target - tweaks never run without
-        // this screen being shown first.
-        private void GoToConfirmTweaks()
-        {
-            _tweakPreview = InstallerEngine.PreviewTweaks(_powerPlanChoice);
-            _wizardPhase = WizardPhase.ConfirmTweaks;
-        }
-
-        // One question, asked once, right before ConfirmTweaks: which power plan the
-        // "Power plan" tweak row should target. Ultimate Performance is a real,
-        // Microsoft-documented hidden plan (same idea as High Performance, just with
-        // the last few power-saving throttles removed) - not on by default because it
-        // has no benefit on laptops and a small idle-power cost on desktops.
-        private void GoToChoosePowerPlan()
-        {
-            _wizardPhase = WizardPhase.ChoosePowerPlan;
-        }
-
-        // First stop once app selection is finalized, before ChoosePowerPlan - the
-        // restore point + optional full image backup happen ahead of the tweaks
-        // question, since they're a safety net for everything that follows,
-        // installs included, not just the tweaks themselves.
-        private void GoToConfirmBackup()
-        {
-            _backupTiming = BackupTiming.Skip;
-            _backupDrive = null;
-            _noEligibleBackupDrive = false;
-            _wizardPhase = WizardPhase.ConfirmBackup;
-        }
-
-        // Only reached if ConfirmBackup's answer was "before" or "after" - a fresh
-        // read of what's actually plugged in right now (nothing changes here).
-        // An empty result skips cleanly with a clear reason shown on the next
-        // screen, rather than the wizard getting stuck with nothing to pick.
-        private void GoToSelectBackupDriveOrSkip()
-        {
-            _backupDriveOptions = BackupEngine.FindEligibleDrives();
-            if (_backupDriveOptions.Count == 0)
-            {
-                _noEligibleBackupDrive = true;
-                _backupTiming = BackupTiming.Skip;
-                GoToPreparingBackup();
-            }
-            else
-            {
-                _noEligibleBackupDrive = false;
-                _wizardPhase = WizardPhase.SelectBackupDrive;
-            }
-        }
-
-        // Blocking step: always creates the restore point, then (only if the
-        // timing chosen was "before") runs the full image backup to completion
-        // before moving on - a backup racing against the installs that follow it
-        // would capture a half-changed system, not the clean "before" snapshot the
-        // user asked for.
-        private void GoToPreparingBackup()
-        {
-            _wizardPhase = WizardPhase.PreparingBackup;
-            _phaseWatch.Restart();
-            _ = RunPreparingBackupAsync();
-        }
-
-        private async Task RunPreparingBackupAsync()
-        {
-            await Task.Run(() => _backup.CreateRestorePoint());
-
-            if (_backupTiming == BackupTiming.Before && _backupDrive != null)
-                await _backup.RunImageBackupAsync(_backupDrive);
-
-            GoToChoosePowerPlan();
-        }
-
-        // The "after" counterpart - only reached from the OnFinished handler once
-        // Installing (apps + tweaks) is fully done.
-        private async Task RunAfterBackupAsync()
-        {
-            if (_backupDrive != null)
-                await _backup.RunImageBackupAsync(_backupDrive);
-
-            _wizardPhase = WizardPhase.Summary;
-            _phaseWatch.Restart();
-        }
-
-        private void StartInstall()
-        {
-            lock (_itemResultLock) { _itemResults.Clear(); }
-            _wizardPhase = WizardPhase.Installing;
-            _phaseWatch.Restart();
-            _ = RunInstallerSafelyAsync();
-        }
-
-        private async Task RunInstallerSafelyAsync()
-        {
-            try
-            {
-                await _installer.RunAsync(_selectedApps, _applyTweaks, _powerPlanChoice);
-            }
-            catch (Exception ex)
-            {
-                lock (_terminalLock) { _terminalLines.Add($"FATAL: {ex.Message}"); }
-                _wizardPhase = WizardPhase.Farewell;
-                _phaseWatch.Restart();
-            }
-        }
-
-        // 1/2/3 (top row or numpad) as a plain 0-based index - shared by
-        // ConfirmBackup's three options and SelectBackupDrive's drive list, since
-        // neither of those is a Y/N question.
-        private static int? DigitIndex(Keys key) => key switch
-        {
-            Keys.D1 or Keys.NumPad1 => 0,
-            Keys.D2 or Keys.NumPad2 => 1,
-            Keys.D3 or Keys.NumPad3 => 2,
-            Keys.D4 or Keys.NumPad4 => 3,
-            Keys.D5 or Keys.NumPad5 => 4,
-            Keys.D6 or Keys.NumPad6 => 5,
-            _ => null
-        };
-
-        private void HandleWizardKey(Keys key)
-        {
-            // Any key dismisses the summary - it's a report, not a Y/N question.
-            // Leads into the shutdown outro rather than straight to Farewell.
-            if (_wizardPhase == WizardPhase.Summary)
-            {
-                _wizardPhase = WizardPhase.ShuttingDown;
-                _phaseWatch.Restart();
-                return;
-            }
-
-            // Neither of these is a Y/N question, so they're handled before the
-            // Y/N shortcut below intercepts anything that isn't Y or N.
-            if (_wizardPhase == WizardPhase.ConfirmBackup)
-            {
-                var choice = DigitIndex(key);
-                if (choice == 0) { _backupTiming = BackupTiming.Before; GoToSelectBackupDriveOrSkip(); }
-                else if (choice == 1) { _backupTiming = BackupTiming.After; GoToSelectBackupDriveOrSkip(); }
-                else if (choice == 2 || key == Keys.N) { _backupTiming = BackupTiming.Skip; GoToPreparingBackup(); }
-                return;
-            }
-
-            if (_wizardPhase == WizardPhase.SelectBackupDrive)
-            {
-                if (key == Keys.N)
-                {
-                    _backupTiming = BackupTiming.Skip;
-                    GoToPreparingBackup();
-                    return;
-                }
-                var index = DigitIndex(key);
-                if (index != null && index < _backupDriveOptions.Count)
-                {
-                    _backupDrive = _backupDriveOptions[index.Value].RootPath;
-                    GoToPreparingBackup();
-                }
-                return;
-            }
-
-            if (_wizardPhase == WizardPhase.ChoosePowerPlan)
-            {
-                var choice = DigitIndex(key);
-                if (choice == 0) { _powerPlanChoice = InstallerEngine.PowerPlanChoice.High; GoToConfirmTweaks(); }
-                else if (choice == 1) { _powerPlanChoice = InstallerEngine.PowerPlanChoice.Ultimate; GoToConfirmTweaks(); }
-                return;
-            }
-
-            bool? yn = key switch
-            {
-                Keys.Y => true,
-                Keys.N => false,
-                _ => null
-            };
-            if (yn == null) return;
-            var answer = yn.Value;
-
-            switch (_wizardPhase)
-            {
-                case WizardPhase.ConfirmAll:
-                    if (answer)
-                    {
-                        _selectedApps.Clear();
-                        _selectedApps.AddRange(InstallerEngine.Catalog);
-                        UnlockAchievement("completionist");
-                        GoToConfirmBackup();
-                    }
-                    else
-                    {
-                        _wizardPhase = WizardPhase.ChooseIndividually;
-                    }
-                    break;
-
-                case WizardPhase.ChooseIndividually:
-                    if (answer)
-                    {
-                        _selectedApps.Clear();
-                        _perAppIndex = 0;
-                        _perAppDecisions = new bool?[InstallerEngine.Catalog.Count];
-                        _wizardPhase = WizardPhase.PerApp;
-                    }
-                    else
-                    {
-                        _wizardPhase = WizardPhase.ConfirmQuit;
-                    }
-                    break;
-
-                case WizardPhase.PerApp:
-                    _perAppDecisions[_perAppIndex] = answer;
-                    if (answer) _selectedApps.Add(InstallerEngine.Catalog[_perAppIndex]);
-                    _perAppIndex++;
-                    if (_perAppIndex >= InstallerEngine.Catalog.Count)
-                        GoToConfirmBackup();
-                    break;
-
-                case WizardPhase.ConfirmTweaks:
-                    _applyTweaks = answer;
-                    StartInstall();
-                    break;
-
-                case WizardPhase.ConfirmQuit:
-                    if (answer)
-                    {
-                        Close();
-                    }
-                    else
-                    {
-                        _wizardPhase = WizardPhase.EasterEgg;
                         _phaseWatch.Restart();
                     }
                     break;
@@ -1123,1560 +435,37 @@ namespace GamingStackGUI
 
             switch (_stage)
             {
-                case Stage.Bios: PaintBios(g); break;
+                case Stage.Bios:
+                {
+                    var st = g.Save();
+                    g.ScaleTransform((float)UiScale, (float)UiScale);
+                    PaintBios(g);
+                    g.Restore(st);
+                    DrawScanlines(g);          // real pixels, so the lines stay fine
+                    break;
+                }
                 case Stage.Bsod: PaintBsod(g); break;
                 case Stage.Boot: PaintBoot(g); break;
-                case Stage.Desktop: PaintDesktop(g); break;
-                case Stage.Terminal: PaintTerminal(g); break;
+                case Stage.Desktop: PaintShell(g); break;
+                case Stage.Terminal: PaintShell(g); break;
             }
         }
 
-        // ---- BIOS ----
-
-        private void DrawBiosLogo(Graphics g)
-        {
-            // Original chip-style mark - not a reproduction of any real BIOS vendor logo.
-            const int x = 40, y = 30, size = 140;
-
-            using var chipPen = new Pen(Color.Cyan, 4);
-            g.DrawRectangle(chipPen, x, y, size, size);
-
-            using var pinPen = new Pen(Color.Gray, 3);
-            for (int i = 0; i < 4; i++)
-            {
-                int offset = (int)(size / 5.0 * (i + 1));
-                g.DrawLine(pinPen, x - 16, y + offset, x, y + offset);
-                g.DrawLine(pinPen, x + size, y + offset, x + size + 16, y + offset);
-            }
-
-            using var monoFont = new Font("Consolas", 48f, FontStyle.Bold);
-            var monoSize = g.MeasureString("GS", monoFont);
-            g.DrawString("GS", monoFont, Brushes.Magenta,
-                x + (size - monoSize.Width) / 2, y + (size - monoSize.Height) / 2);
-
-            using var wordFont = new Font("Consolas", 20f, FontStyle.Regular);
-            var wordSize = g.MeasureString("GAMINGSTACK SYSTEMS", wordFont);
-            g.DrawString("GAMINGSTACK SYSTEMS", wordFont, Brushes.Gainsboro,
-                x + size + 30, y + (size - wordSize.Height) / 2);
-        }
-
-        private void PaintBios(Graphics g)
-        {
-            DrawBiosLogo(g);
-
-            var elapsed = _stageWatch.ElapsedMilliseconds;
-            int x = 60, y = 200;
-
-            foreach (var line in _timedLines)
-            {
-                if (elapsed < line.At) continue;
-
-                using var brush = new SolidBrush(line.Color);
-                g.DrawString(line.Text, _mono, brush, x, y);
-                y += 26;
-
-                if (line.Text == "Memory Test:" && elapsed >= _memCountAt)
-                {
-                    var progress = Math.Clamp((elapsed - _memCountAt) / (double)MemCountDurationMs, 0.0, 1.0);
-                    var displayedMb = (long)(progress * _targetRamGb * 1024);
-                    var done = progress >= 1.0;
-                    using var memBrush = new SolidBrush(done ? Color.LightGreen : Color.Gainsboro);
-                    var suffix = done ? " OK" : "";
-                    g.DrawString($"  {displayedMb:N0}MB{suffix}", _mono, memBrush, x, y);
-                    y += 26;
-                }
-            }
-
-            // "Press DEL" prompt: pinned to the bottom of the screen and visible from
-            // the first frame (not part of the timed reveal above) - the whole point is
-            // for it to be impossible to miss.
-            using var delFont = new Font("Consolas", 15f, FontStyle.Bold);
-            const string delPrompt = "Press DEL to enter BIOS Setup... Go on, I dare you!";
-            var delSize = g.MeasureString(delPrompt, delFont);
-            g.DrawString(delPrompt, delFont, Brushes.Goldenrod, (Width - delSize.Width) / 2, Height - delSize.Height - 30);
-        }
-
-        // ---- Easter egg: press Delete during Bios ----
-
-        private void PaintBsod(Graphics g)
-        {
-            g.Clear(Color.FromArgb(0, 0, 170));
-
-            using var bigFont = new Font("Consolas", 30f, FontStyle.Bold);
-            using var smallFont = new Font("Consolas", 15f, FontStyle.Regular);
-
-            var blocks = new (string Text, Font Font)[]
-            {
-                (":(", bigFont),
-                ("Why would you press that,\nyou have just broken your nice new PC.", bigFont),
-                ("Don't worry, we probably weren't using that RAM anyway.\nRebooting in a totally normal, definitely-fine way...", smallFont)
-            };
-
-            const int gap = 24;
-            var sizes = blocks.Select(b => g.MeasureString(b.Text, b.Font)).ToArray();
-            var totalHeight = sizes.Sum(s => s.Height) + gap * (blocks.Length - 1);
-            var maxWidth = sizes.Max(s => s.Width);
-
-            // Centered as a block on screen; each line left-justified within that block.
-            var blockLeft = (Width - maxWidth) / 2f;
-            var y = (Height - totalHeight) / 2f;
-
-            for (int i = 0; i < blocks.Length; i++)
-            {
-                g.DrawString(blocks[i].Text, blocks[i].Font, Brushes.White, blockLeft, y);
-                y += sizes[i].Height + gap;
-            }
-        }
-
-        // ---- Boot: original retro animation (sky, clouds, waving flag) ----
-
-        private void DrawSky(Graphics g)
-        {
-            // Clear daytime blue rather than a dusky purple - reads more like an actual
-            // sky (and matches the desktop wallpaper's palette) for the clouds to move
-            // across.
-            using var sky = new LinearGradientBrush(
-                new Rectangle(0, 0, Width, Height),
-                Color.FromArgb(70, 130, 220),
-                Color.FromArgb(190, 225, 250),
-                LinearGradientMode.Vertical);
-            g.FillRectangle(sky, 0, 0, Width, Height);
-        }
-
-        private void DrawSun(Graphics g)
-        {
-            if (_sunSprite == null) return;
-            const int size = 90;
-            DrawPixelSprite(g, _sunSprite, Width - size - 60, 50, size, size);
-        }
-
-        private void DrawHills(Graphics g, double t)
-        {
-            if (_hillsSprite == null) return;
-
-            const int stripHeight = 200;
-            var y = Height - 175 - stripHeight;
-            var stripWidth = _hillsSprite.Width * (stripHeight / (double)_hillsSprite.Height);
-            var distance = (t * 6 * CloudSpeedMultiplier) % stripWidth; // slow parallax drift
-
-            // Tile the strip twice, offset by the scroll distance, so it wraps
-            // seamlessly across the full window width with no visible gap.
-            for (var x = -distance; x < Width; x += stripWidth)
-                DrawPixelSprite(g, _hillsSprite, (int)x, y, (int)Math.Ceiling(stripWidth) + 1, stripHeight);
-        }
-
-        private void DrawClouds(Graphics g, double t)
-        {
-            DrawCloud(g, 90, 60, 18 * CloudSpeedMultiplier, t);
-            DrawCloud(g, 220, 40, 26 * CloudSpeedMultiplier, t);
-            DrawCloud(g, 400, 90, 34 * CloudSpeedMultiplier, t);
-
-            // A few extra, quicker clouds - phase-shifted (t + offset) so they don't
-            // all line up identically with the three above, for a busier sky.
-            DrawCloud(g, 140, 30, 44 * CloudSpeedMultiplier, t + 0.6);
-            DrawCloud(g, 300, 22, 50 * CloudSpeedMultiplier, t + 1.3);
-            DrawCloud(g, 60, 45, 40 * CloudSpeedMultiplier, t + 2.1);
-        }
-
-        private void DrawCloud(Graphics g, int baseY, int size, double speedPxPerSec, double t)
-        {
-            var cloudWidth = size * 3;
-            var distance = (t * speedPxPerSec) % (Width + cloudWidth);
-            var x = Width - distance;
-
-            if (_cloudSprite == null)
-            {
-                // Fallback if the embedded sprite failed to load for some reason.
-                using var brush = new SolidBrush(Color.FromArgb(230, 235, 245));
-                g.FillEllipse(brush, (float)x, baseY, size * 1.4f, size * 0.8f);
-                g.FillEllipse(brush, (float)x + size * 0.6f, baseY - size * 0.2f, size * 1.2f, size * 0.9f);
-                g.FillEllipse(brush, (float)x + size * 1.3f, baseY, size * 1.1f, size * 0.7f);
-                return;
-            }
-
-            var drawH = size;
-            var drawW = size * (_cloudSprite.Width / (double)_cloudSprite.Height);
-            DrawPixelSprite(g, _cloudSprite, (int)x, baseY, (int)drawW, drawH);
-        }
-
-        // Draws a low-res sprite scaled up with nearest-neighbor sampling, so it
-        // stays crisp and blocky instead of blurring into a smooth gradient - the
-        // whole point of hand-pixelled boot-animation art over the old procedural
-        // shapes.
-        private static void DrawPixelSprite(Graphics g, Image sprite, int x, int y, int w, int h)
-        {
-            var prevInterpolation = g.InterpolationMode;
-            var prevPixelOffset = g.PixelOffsetMode;
-            g.InterpolationMode = InterpolationMode.NearestNeighbor;
-            g.PixelOffsetMode = PixelOffsetMode.Half;
-            g.DrawImage(sprite, x, y, w, h);
-            g.InterpolationMode = prevInterpolation;
-            g.PixelOffsetMode = prevPixelOffset;
-        }
-
-        private void DrawWavingFlag(Graphics g, double t)
-        {
-            const int flagWidth = 360, flagHeight = 150, stripCount = 72;
-            const int reservedBottom = 200;   // leave room for the title + progress bar below
-            const int poleHeight = 320;
-            const int raiseBy = 50;   // nudge the whole pole+flag group higher, off the horizon
-
-            int poleX = (Width - flagWidth) / 2;
-            int poleTopY = Math.Max(40, (Height - reservedBottom - poleHeight) / 2 - raiseBy);
-
-            using var polePen = new Pen(Color.Silver, 6);
-            g.DrawLine(polePen, poleX, poleTopY, poleX, poleTopY + poleHeight);
-            g.FillEllipse(Brushes.Silver, poleX - 9, poleTopY - 18, 18, 18);
-
-            int flagX = poleX;
-            int flagY = poleTopY + 18;
-
-            if (_flagSheet == null)
-            {
-                // Fallback if the embedded sprite sheet failed to load - the old
-                // live per-strip sine wave, so the animation still runs either way.
-                float stripW = flagWidth / (float)stripCount;
-                float third = flagHeight / 3f;
-
-                using var bandTop = new SolidBrush(Color.FromArgb(0, 210, 230));
-                using var bandMid = new SolidBrush(Color.FromArgb(18, 16, 36));
-                using var bandBot = new SolidBrush(Color.FromArgb(255, 0, 170));
-
-                for (int i = 0; i < stripCount; i++)
-                {
-                    float localX = i * stripW;
-                    float wave = (float)(Math.Sin((localX * 0.06) + t * 2.1) * 18.0);
-                    float attachFactor = Math.Min(1f, localX / 40f);
-                    wave *= attachFactor;
-
-                    float sx = flagX + localX;
-                    float sy = flagY + wave;
-
-                    g.FillRectangle(bandTop, sx, sy, stripW + 1, third);
-                    g.FillRectangle(bandMid, sx, sy + third, stripW + 1, third);
-                    g.FillRectangle(bandBot, sx, sy + third * 2, stripW + 1, third);
-                }
-            }
-            else
-            {
-                // Pick the current frame from the pre-baked wave sprite sheet, same
-                // idea as a classic sprite-sheet animation rather than a live
-                // per-pixel simulation.
-                var frame = (int)(t * FlagFramesPerSecond) % FlagFrameCount;
-                var srcRect = new Rectangle(frame * FlagFrameWidth, 0, FlagFrameWidth, FlagFrameHeight);
-                var destRect = new Rectangle(flagX, flagY, flagWidth, flagHeight);
-
-                var prevInterpolation = g.InterpolationMode;
-                var prevPixelOffset = g.PixelOffsetMode;
-                g.InterpolationMode = InterpolationMode.NearestNeighbor;
-                g.PixelOffsetMode = PixelOffsetMode.Half;
-                g.DrawImage(_flagSheet, destRect, srcRect, GraphicsUnit.Pixel);
-                g.InterpolationMode = prevInterpolation;
-                g.PixelOffsetMode = prevPixelOffset;
-            }
-
-            using var flagFont = new Font("Consolas", 26f, FontStyle.Bold);
-            const string label = "GAMINGSTACK";
-            var labelSize = g.MeasureString(label, flagFont);
-            g.DrawString(label, flagFont, Brushes.White,
-                flagX + (flagWidth - labelSize.Width) / 2, flagY + flagHeight / 2 - labelSize.Height / 2);
-        }
-
-        private void PaintBoot(Graphics g)
-        {
-            var elapsed = _stageWatch.ElapsedMilliseconds;
-            var t = elapsed / 1000.0;
-
-            DrawSky(g);
-            DrawSun(g);
-            DrawHills(g, t);
-            DrawClouds(g, t);
-            DrawWavingFlag(g, t);
-
-            const string title = "Starting GamingStack 95...";
-            var titleSize = g.MeasureString(title, _monoLarge);
-            g.DrawString(title, _monoLarge, Brushes.White, (Width - titleSize.Width) / 2, Height - 160);
-
-            // Full-width, segmented block style (like the real Win9x boot progress bar)
-            // instead of a flat continuous fill in one static color - a run of discrete
-            // blocks, cycling through a gradient, reads much less "stuck" than one solid
-            // color creeping across the screen.
-            var pct = Math.Min(1.0, elapsed / (double)BootHoldMs);
-            const int barMargin = 60;
-            const int barHeight = 26;
-            const int blockCount = 44;
-            const int blockGap = 3;
-
-            var barWidth = Width - barMargin * 2;
-            var barX = barMargin;
-            var barY = Height - 110;
-
-            g.DrawRectangle(Pens.Gainsboro, barX, barY, barWidth, barHeight);
-
-            var innerWidth = barWidth - 4;
-            var blockWidth = (innerWidth - blockGap * (blockCount - 1)) / (float)blockCount;
-            var filledBlocks = (int)(pct * blockCount);
-
-            for (int i = 0; i < filledBlocks; i++)
-            {
-                var hueT = i / (float)(blockCount - 1);
-                using var blockBrush = new SolidBrush(LerpColor(Color.FromArgb(0, 210, 230), Color.FromArgb(255, 0, 170), hueT));
-                var bx = barX + 2 + i * (blockWidth + blockGap);
-                g.FillRectangle(blockBrush, bx, barY + 2, blockWidth, barHeight - 4);
-            }
-        }
-
-        private static Color LerpColor(Color a, Color b, float t)
-        {
-            t = Math.Clamp(t, 0f, 1f);
-            return Color.FromArgb(
-                (int)(a.R + (b.R - a.R) * t),
-                (int)(a.G + (b.G - a.G) * t),
-                (int)(a.B + (b.B - a.B) * t));
-        }
-
-        // ---- Desktop / shared wallpaper ----
-
-        private void PaintDesktop(Graphics g)
-        {
-            DrawWallpaper(g);
-            DrawDesktopIcons(g);
-            DrawTaskbar(g);
-        }
-
-        private void DrawWallpaper(Graphics g)
-        {
-            if (_wallpaper == null)
-            {
-                using var bg = new SolidBrush(Color.FromArgb(0, 90, 90));
-                g.FillRectangle(bg, 0, 0, Width, Height);
-
-                using var font = new Font("Consolas", 16f, FontStyle.Italic);
-                const string msg = "[ Placeholder wallpaper - drop your own image in here later ]";
-                var size = g.MeasureString(msg, font);
-                g.DrawString(msg, font, Brushes.White, (Width - size.Width) / 2, (Height - size.Height) / 2);
-                return;
-            }
-
-            // "Cover" fit - scale to fill the screen without distorting, cropping overflow,
-            // since the wallpaper's aspect ratio won't always match the monitor's.
-            float scale = Math.Max(Width / (float)_wallpaper.Width, Height / (float)_wallpaper.Height);
-            var drawW = _wallpaper.Width * scale;
-            var drawH = _wallpaper.Height * scale;
-            var drawX = (Width - drawW) / 2f;
-            var drawY = (Height - drawH) / 2f;
-            g.DrawImage(_wallpaper, drawX, drawY, drawW, drawH);
-        }
-
-        private void DrawDesktopIcons(Graphics g)
-        {
-            DrawIcon(g, 40, 40, "System", DrawDriveGlyph);
-            DrawIcon(g, 40, 150, "Files", DrawFolderGlyph);
-        }
-
-        private void DrawIcon(Graphics g, int x, int y, string label, Action<Graphics, int, int> drawGlyph)
-        {
-            drawGlyph(g, x, y);
-
-            var labelSize = g.MeasureString(label, _mono);
-            var labelX = x + 24 - labelSize.Width / 2;
-            var labelY = y + 46;
-
-            using var shadowBrush = new SolidBrush(Color.FromArgb(140, 0, 0, 0));
-            g.FillRectangle(shadowBrush, labelX - 2, labelY - 1, labelSize.Width + 4, labelSize.Height + 2);
-            g.DrawString(label, _mono, Brushes.White, labelX, labelY);
-        }
-
-        private static void DrawFolderGlyph(Graphics g, int x, int y)
-        {
-            using var tabBrush = new SolidBrush(Color.FromArgb(255, 205, 60));
-            g.FillRectangle(tabBrush, x, y + 4, 20, 8);
-
-            using var bodyBrush = new SolidBrush(Color.FromArgb(255, 190, 40));
-            g.FillRectangle(bodyBrush, x, y + 10, 48, 30);
-
-            using var pen = new Pen(Color.FromArgb(160, 110, 20), 1);
-            g.DrawRectangle(pen, x, y + 10, 48, 30);
-            g.DrawRectangle(pen, x, y + 4, 20, 8);
-        }
-
-        private static void DrawDriveGlyph(Graphics g, int x, int y)
-        {
-            using var bodyBrush = new SolidBrush(Color.FromArgb(210, 210, 220));
-            g.FillRectangle(bodyBrush, x, y, 48, 36);
-
-            using var pen = new Pen(Color.FromArgb(90, 90, 100), 1);
-            g.DrawRectangle(pen, x, y, 48, 36);
-
-            using var slotBrush = new SolidBrush(Color.FromArgb(40, 40, 50));
-            g.FillRectangle(slotBrush, x + 6, y + 6, 36, 6);
-
-            using var ledBrush = new SolidBrush(Color.FromArgb(0, 220, 90));
-            g.FillEllipse(ledBrush, x + 6, y + 22, 8, 8);
-        }
-
-        private readonly Font _clockFont = new("Consolas", 10f, FontStyle.Regular);
-
-        private void DrawTaskbar(Graphics g)
-        {
-            const int barHeight = 44;
-            using var barBrush = new SolidBrush(Color.FromArgb(192, 192, 192));
-            g.FillRectangle(barBrush, 0, Height - barHeight, Width, barHeight);
-
-            // Start button: sized around the actual text width instead of a fixed 80px,
-            // and the text is centered both ways within it - a fixed-width button with
-            // left-anchored text meant "Start" was never actually centered in it.
-            using var btnBrush = new SolidBrush(Color.FromArgb(220, 220, 220));
-            var startText = "Start";
-            var startTextSize = g.MeasureString(startText, _mono);
-            var startWidth = (int)startTextSize.Width + 36;
-            var startRect = new Rectangle(6, Height - barHeight + 5, startWidth, barHeight - 10);
-            g.FillRectangle(btnBrush, startRect);
-            g.DrawRectangle(Pens.Gray, startRect);
-            g.DrawString(startText, _mono, Brushes.Black,
-                startRect.X + (startRect.Width - startTextSize.Width) / 2,
-                startRect.Y + (startRect.Height - startTextSize.Height) / 2);
-
-            // Clock: time on top, date underneath. Anchored from the right edge (not
-            // computed via a left position + width) and using a fixed, small per-line
-            // height rather than MeasureString's height (which pads more than a 10pt
-            // font actually needs) - together these were letting the date creep past
-            // both the right edge and the bottom of the screen on some setups.
-            const int clockLineHeight = 14;
-            const int clockRightMargin = 20;
-            var timeStr = DateTime.Now.ToString("HH:mm");
-            var dateStr = DateTime.Now.ToString("dd/MM/yyyy");
-            var timeSize = g.MeasureString(timeStr, _clockFont);
-            var dateSize = g.MeasureString(dateStr, _clockFont);
-            var clockRight = Width - clockRightMargin;
-            var clockBlockHeight = clockLineHeight * 2;
-            var clockTop = Height - barHeight + (barHeight - clockBlockHeight) / 2;
-            g.DrawString(timeStr, _clockFont, Brushes.Black, clockRight - timeSize.Width, clockTop);
-            g.DrawString(dateStr, _clockFont, Brushes.Black, clockRight - dateSize.Width, clockTop + clockLineHeight);
-        }
-
-        // ---- Terminal (opens on top of the desktop, runs the interactive wizard then the installer) ----
-
-        private void PaintTerminal(Graphics g)
-        {
-            DrawWallpaper(g);
-            DrawDesktopIcons(g);
-            DrawTaskbar(g);
-
-            var elapsed = _stageWatch.ElapsedMilliseconds;
-            var openProgress = Math.Clamp(elapsed / (double)TerminalOpenMs, 0.0, 1.0);
-            var eased = 1 - Math.Pow(1 - openProgress, 3);
-
-            if (_termW == null)
-            {
-                _termW = (int)(Width * 0.7);
-                _termH = (int)(Height * 0.62);
-                _termX = (Width - _termW.Value) / 2;
-                _termY = (Height - _termH.Value) / 2;
-            }
-            var fullW = _termW!.Value;
-            var fullH = _termH!.Value;
-            var fullX = _termX!.Value;
-            var fullY = _termY!.Value;
-
-            var w = (int)(fullW * eased);
-            var h = (int)(fullH * eased);
-            if (w <= 0 || h <= 0) return;
-            var x = fullX + (fullW - w) / 2;
-            var y = fullY + (fullH - h) / 2;
-
-            g.FillRectangle(Brushes.Black, x, y, w, h);
-            g.DrawRectangle(Pens.Gainsboro, x, y, w, h);
-
-            if (eased < 0.98) return;
-
-            var titleHeight = _titleBarHeight;
-            using var titleBrush = new SolidBrush(Color.FromArgb(30, 30, 30));
-            g.FillRectangle(titleBrush, fullX, fullY, fullW, titleHeight);
-            var titleTextSize = g.MeasureString("GamingStack Installer", _mono);
-            g.DrawString("GamingStack Installer", _mono, Brushes.Gainsboro,
-                fullX + 16, fullY + (titleHeight - titleTextSize.Height) / 2);
-
-            // Resize grip, bottom-right corner (drag it to resize); drag the title bar
-            // to move the window. Both handled in OnMouseDown/Move/Up below.
-            using (var gripPen = new Pen(Color.Gray, 2))
-            {
-                var gripX = fullX + fullW - TermResizeGrip;
-                var gripY = fullY + fullH - TermResizeGrip;
-                for (int i = 6; i <= TermResizeGrip; i += 6)
-                    g.DrawLine(gripPen, gripX + TermResizeGrip - i, gripY + TermResizeGrip, gripX + TermResizeGrip, gripY + TermResizeGrip - i);
-            }
-
-            switch (_wizardPhase)
-            {
-                case WizardPhase.ConfirmBackup:
-                    DrawConfirmBackup(g, fullX, fullY, fullW, fullH, titleHeight);
-                    break;
-                case WizardPhase.SelectBackupDrive:
-                    DrawSelectBackupDrive(g, fullX, fullY, fullW, fullH, titleHeight);
-                    break;
-                case WizardPhase.PreparingBackup:
-                    DrawBackupProgress(g, fullX, fullY, fullW, fullH, titleHeight,
-                        "Preparing your PC - this can take a while, please don't turn off your computer.");
-                    break;
-                case WizardPhase.ChoosePowerPlan:
-                    DrawChoosePowerPlan(g, fullX, fullY, fullW, fullH, titleHeight);
-                    break;
-                case WizardPhase.ConfirmTweaks:
-                    DrawConfirmTweaks(g, fullX, fullY, fullW, fullH, titleHeight);
-                    break;
-                case WizardPhase.Installing:
-                    DrawInstallerLog(g, fullX, fullY, fullW, fullH, titleHeight, elapsed);
-                    break;
-                case WizardPhase.RunningBackup:
-                    DrawBackupProgress(g, fullX, fullY, fullW, fullH, titleHeight,
-                        "Running your full disk-image backup - this can take a while, please don't turn off your computer.");
-                    break;
-                case WizardPhase.Summary:
-                    DrawSummary(g, fullX, fullY, fullW, fullH, titleHeight);
-                    break;
-                case WizardPhase.ShuttingDown:
-                    DrawShuttingDown(g, fullX, fullY, fullW, fullH, titleHeight);
-                    break;
-                case WizardPhase.EasterEgg:
-                    DrawEasterEgg(g, fullX, fullY, fullW, fullH, titleHeight, _phaseWatch.ElapsedMilliseconds);
-                    break;
-                case WizardPhase.Farewell:
-                    DrawFarewell(g, fullX, fullY, fullW, fullH, titleHeight);
-                    break;
-                default:
-                    DrawWizard(g, fullX, fullY, fullW, fullH, titleHeight);
-                    break;
-            }
-
-            DrawAchievementToast(g, fullX, fullY, fullW, fullH);
-        }
-
-        // Bottom-right achievement toast, drawn as an overlay on top of whatever phase
-        // is currently showing - an unlock can happen mid-wizard or mid-install, and
-        // shouldn't have to wait for a specific screen. Slides up, holds, then fades
-        // out; the queue (see Advance()) only ever shows one at a time.
-        private void DrawAchievementToast(Graphics g, int fullX, int fullY, int fullW, int fullH)
-        {
-            if (_currentToast == null) return;
-            var toast = _currentToast.Value;
-            var elapsed = _toastWatch.ElapsedMilliseconds;
-
-            // Roughly double the original size across the board - box, fonts, icon,
-            // padding - since the first pass read as too small to comfortably read.
-            // Capped against the window width for a small/resized terminal.
-            const int margin = 24;
-            var boxWidth = Math.Min(640, fullW - margin * 2);
-            const int padding = 22;
-            const int iconColumnWidth = 76;
-            const int headerLineHeight = 26;
-            const int titleLineHeight = 30;
-            const int subtitleLineHeight = 22;
-            const int maxSubtitleLines = 3; // defensive cap - real subtitles are one-liners
-
-            using var headerFont = new Font("Consolas", 14f, FontStyle.Bold);
-            using var titleFont = new Font("Consolas", 18f, FontStyle.Bold);
-            using var subtitleFont = new Font("Consolas", 14f, FontStyle.Regular);
-
-            // Box height is driven by the actual content, not a guessed constant - a
-            // long title or subtitle wraps onto extra lines instead of overflowing the
-            // box, which is exactly what was overlapping/getting cut off before.
-            var textAreaWidth = boxWidth - iconColumnWidth - padding * 2;
-            var titleLines = WrapTextToWidth(g, toast.Title, titleFont, textAreaWidth);
-            var subtitleLines = WrapTextToWidth(g, toast.Subtitle, subtitleFont, textAreaWidth);
-            if (subtitleLines.Count > maxSubtitleLines)
-                subtitleLines = subtitleLines.Take(maxSubtitleLines).ToList();
-
-            var contentHeight = headerLineHeight + titleLines.Count * titleLineHeight +
-                                 subtitleLines.Count * subtitleLineHeight;
-            var boxHeight = Math.Max(128, contentHeight + padding * 2);
-
-            // Slide up from just below the window edge, hold in place, then fade by
-            // dropping alpha rather than moving - a fade reads as "done", a slide back
-            // down reads as "still busy", which we don't want colliding with a toast
-            // that's about to be replaced by the next one in queue.
-            float slideProgress = Math.Clamp(elapsed / (float)ToastSlideInMs, 0f, 1f);
-            var eased = 1 - MathF.Pow(1 - slideProgress, 3);
-
-            int alpha;
-            if (elapsed < ToastSlideInMs + ToastHoldMs)
-            {
-                alpha = 255;
-            }
-            else
-            {
-                var fadeElapsed = elapsed - (ToastSlideInMs + ToastHoldMs);
-                var fadeProgress = Math.Clamp(fadeElapsed / (float)ToastFadeOutMs, 0f, 1f);
-                alpha = (int)(255 * (1 - fadeProgress));
-            }
-            if (alpha <= 0) return;
-
-            var boxX = fullX + fullW - boxWidth - margin;
-            var restY = fullY + fullH - boxHeight - margin;
-            var boxY = (int)(restY + boxHeight * (1 - eased)); // slides up into place
-
-            using var bgBrush = new SolidBrush(Color.FromArgb(alpha, 20, 20, 20));
-            using var borderPen = new Pen(Color.FromArgb(alpha, 255, 215, 0), 2); // gold
-            g.FillRectangle(bgBrush, boxX, boxY, boxWidth, boxHeight);
-            g.DrawRectangle(borderPen, boxX, boxY, boxWidth, boxHeight);
-
-            DrawPixelTrophy(g, boxX + 20, boxY + padding + 4, alpha);
-
-            using var headerBrush = new SolidBrush(Color.FromArgb(alpha, 255, 215, 0));
-            using var titleBrush = new SolidBrush(Color.FromArgb(alpha, 255, 255, 255));
-            using var subtitleBrush = new SolidBrush(Color.FromArgb(alpha, 180, 180, 180));
-
-            var textX = boxX + iconColumnWidth + padding;
-            var ty = boxY + padding;
-            g.DrawString("ACHIEVEMENT UNLOCKED", headerFont, headerBrush, textX, ty);
-            ty += headerLineHeight;
-
-            foreach (var line in titleLines)
-            {
-                g.DrawString(line, titleFont, titleBrush, textX, ty);
-                ty += titleLineHeight;
-            }
-
-            foreach (var line in subtitleLines)
-            {
-                g.DrawString(line, subtitleFont, subtitleBrush, textX, ty);
-                ty += subtitleLineHeight;
-            }
-        }
-
-        // A small original pixel-art trophy (rectangles/ellipses only) for the toast -
-        // not a reproduction of any real icon or brand.
-        private static void DrawPixelTrophy(Graphics g, int x, int y, int alpha)
-        {
-            using var cupBrush = new SolidBrush(Color.FromArgb(alpha, 255, 215, 0));
-            using var stemBrush = new SolidBrush(Color.FromArgb(alpha, 218, 165, 32));
-            g.FillRectangle(cupBrush, x + 8, y, 24, 24);
-            g.FillEllipse(cupBrush, x, y, 12, 20);
-            g.FillEllipse(cupBrush, x + 28, y, 12, 20);
-            g.FillRectangle(stemBrush, x + 16, y + 24, 8, 12);
-            g.FillRectangle(stemBrush, x + 10, y + 36, 20, 6);
-        }
-
-        // Cached across frames since the catalog never changes at runtime - no point
-        // re-grouping and re-bin-packing 30-odd entries on every 33ms paint tick.
-        private List<(string Category, List<int> Indices)>? _wizardColumn0;
-        private List<(string Category, List<int> Indices)>? _wizardColumn1;
-
-        // Drives the typewriter tick sound (see Advance()) - tracks how many characters
-        // of the wizard's app list have been revealed so far, so a tick only plays when
-        // new text has actually appeared rather than once per timer tick regardless.
-        private int _wizardCharsRevealed;
-        private int? _wizardTotalCharsCache;
-
-        private static bool IsWizardTypingPhase(WizardPhase phase) => phase is
-            WizardPhase.ConfirmAll or WizardPhase.ChooseIndividually or
-            WizardPhase.PerApp or WizardPhase.ConfirmQuit;
-
-        // Total character count of the wizard's app list, for pacing the typewriter
-        // reveal/tick sound. This is deterministic from the catalog alone - the marker
-        // ("[x]"/"[ ]"/"-->"/"   ") is always 3 characters regardless of decision state,
-        // so per-app selection changes never change this total.
-        private int GetWizardTotalChars()
-        {
-            if (_wizardTotalCharsCache != null) return _wizardTotalCharsCache.Value;
-
-            BuildWizardColumnsIfNeeded();
-            var catalog = InstallerEngine.Catalog;
-            var total = 0;
-            foreach (var columnGroups in new[] { _wizardColumn0!, _wizardColumn1! })
-            {
-                foreach (var (category, indices) in columnGroups)
-                {
-                    total += $"-- {category} --".Length;
-                    foreach (var i in indices)
-                        total += $"    {catalog[i].FriendlyName}".Length; // 3-char marker + space
-                }
-            }
-
-            _wizardTotalCharsCache = total;
-            return total;
-        }
-
-        private void BuildWizardColumnsIfNeeded()
-        {
-            if (_wizardColumn0 != null) return;
-
-            var catalog = InstallerEngine.Catalog;
-
-            // Group by category, preserving the order categories first appear in the
-            // catalog (not a sort - so the wizard's on-screen order matches source order).
-            var groups = new List<(string Category, List<int> Indices)>();
-            for (int i = 0; i < catalog.Count; i++)
-            {
-                var cat = catalog[i].Category;
-                var group = groups.FirstOrDefault(g => g.Category == cat);
-                if (group.Indices == null)
-                {
-                    group = (cat, new List<int>());
-                    groups.Add(group);
-                }
-                group.Indices.Add(i);
-            }
-
-            // Greedily bin-pack whole categories (never split one across columns) into
-            // two columns, always dropping the next category into whichever column is
-            // currently shorter - keeps the two columns roughly the same height even
-            // though categories vary in size.
-            var col0 = new List<(string, List<int>)>();
-            var col1 = new List<(string, List<int>)>();
-            var height0 = 0;
-            var height1 = 0;
-            foreach (var group in groups)
-            {
-                var blockHeight = 3 + group.Indices.Count; // heading + spacer + items + trailing spacer
-                if (height0 <= height1)
-                {
-                    col0.Add(group);
-                    height0 += blockHeight;
-                }
-                else
-                {
-                    col1.Add(group);
-                    height1 += blockHeight;
-                }
-            }
-
-            _wizardColumn0 = col0;
-            _wizardColumn1 = col1;
-        }
-
-        // How fast the wizard's app list "types" itself out, in characters/second.
-        // Deliberately slow - this is meant to read like a Resident Evil
-        // typewriter save point, not a fast terminal dump. Was 420.
-        private const int WizardTypeCharsPerSecond = 60;
-
-        private readonly struct WizardLine
-        {
-            public readonly string Text;
-            public readonly Font Font;
-            public readonly Brush Brush;
-            public WizardLine(string text, Font font, Brush brush) { Text = text; Font = font; Brush = brush; }
-        }
-
-        // The disclosure screen itself: every tweak, its real current value, and
-        // what it would become, drawn in full immediately (no typewriter effect -
-        // by this point the catalog's already fully typed, and this is a short
-        // consent screen rather than a big reveal). Nothing here has changed
-        // anything on the machine yet - that only happens in InstallerEngine's
-        // ApplyTweaks(), and only if the user answers Y to the prompt at the bottom.
-        // "Before" and "after" are asked as a single three-way choice rather than a
-        // Y/N gate per option, since exactly one of the three applies - matches
-        // how the choice actually works instead of forcing three separate
-        // yes/no questions to express one decision.
-        private void DrawConfirmBackup(Graphics g, int fullX, int fullY, int fullW, int fullH, int titleHeight)
-        {
-            var contentX = fullX + 16;
-            const int lineHeight = 18;
-
-            var headingTop = fullY + titleHeight + 10 + lineHeight;
-            g.DrawString("A System Restore point is always created before anything changes - no need to ask about that.",
-                _monoSmall, Brushes.Gainsboro, contentX, headingTop);
-            g.DrawString("On top of that, GamingStack can also do a full disk-image backup, if you'd like one:",
-                _monoSmall, Brushes.Gainsboro, contentX, headingTop + lineHeight);
-
-            var listTop = headingTop + lineHeight * 2 + 14;
-            var needed = BackupEngine.EstimatedNeededBytes();
-            g.DrawString($"[1] Before anything is installed or changed (a clean, \"virgin machine\" backup)",
-                _monoSmall, Brushes.Gold, contentX, listTop);
-            g.DrawString($"[2] After everything is installed and tweaked (a \"gaming ready\" backup)",
-                _monoSmall, Brushes.Gold, contentX, listTop + lineHeight);
-            g.DrawString($"[3] Skip the image backup - just the restore point above",
-                _monoSmall, Brushes.Gold, contentX, listTop + lineHeight * 2);
-
-            var noteTop = listTop + lineHeight * 3 + 14;
-            g.DrawString($"A full backup needs roughly {BackupEngine.FormatBytes(needed)} free on another drive, and can take a",
-                _monoSmall, Brushes.DimGray, contentX, noteTop);
-            g.DrawString("while - the next screen shows what's available so you can judge for yourself.",
-                _monoSmall, Brushes.DimGray, contentX, noteTop + lineHeight);
-
-            var promptTop = noteTop + lineHeight * 2 + 16;
-            using var promptFont = new Font("Consolas", 14f, FontStyle.Bold);
-            g.DrawString("Choose 1, 2 or 3", promptFont, Brushes.Gold, contentX, promptTop);
-        }
-
-        private void DrawSelectBackupDrive(Graphics g, int fullX, int fullY, int fullW, int fullH, int titleHeight)
-        {
-            var contentX = fullX + 16;
-            const int lineHeight = 18;
-
-            var headingTop = fullY + titleHeight + 10 + lineHeight;
-            var timingLabel = _backupTiming == BackupTiming.Before ? "before installing anything" : "after everything's installed";
-            g.DrawString($"Pick a drive for the backup ({timingLabel}):", _monoSmall, Brushes.Gainsboro, contentX, headingTop);
-
-            var needed = BackupEngine.EstimatedNeededBytes();
-            var listTop = headingTop + lineHeight + 10;
-
-            if (_backupDriveOptions.Count == 0)
-            {
-                g.DrawString("No eligible drives detected right now (needs a non-system, NTFS-formatted drive).",
-                    _monoSmall, Brushes.Gold, contentX, listTop);
-            }
-            else
-            {
-                for (int i = 0; i < _backupDriveOptions.Count; i++)
-                {
-                    var d = _backupDriveOptions[i];
-                    var enoughRoom = needed <= 0 || d.FreeBytes >= needed;
-                    var brush = enoughRoom ? Brushes.LightGreen : Brushes.OrangeRed;
-                    var roomNote = enoughRoom ? "" : "  (may not be enough room)";
-                    g.DrawString($"[{i + 1}] {d.Label} - {BackupEngine.FormatBytes(d.FreeBytes)} free{roomNote}",
-                        _monoSmall, brush, contentX, listTop + i * lineHeight);
-                }
-            }
-
-            var promptTop = listTop + Math.Max(1, _backupDriveOptions.Count) * lineHeight + 16;
-            using var promptFont = new Font("Consolas", 14f, FontStyle.Bold);
-            var prompt = _backupDriveOptions.Count == 0
-                ? "Press [N] to continue without an image backup"
-                : $"Choose 1-{_backupDriveOptions.Count}, or [N] to skip the image backup";
-            g.DrawString(prompt, promptFont, Brushes.Gold, contentX, promptTop);
-        }
-
-        // Shared by PreparingBackup (restore point + optional "before" image
-        // backup) and RunningBackup (the "after" image backup) - both are the same
-        // "don't touch anything, this takes a while" blocking screen, just with a
-        // different message and a different Stopwatch driving the elapsed time.
-        private void DrawBackupProgress(Graphics g, int fullX, int fullY, int fullW, int fullH, int titleHeight, string message)
-        {
-            var contentX = fullX + 16;
-            const int lineHeight = 18;
-
-            var headingTop = fullY + titleHeight + 10 + lineHeight;
-            foreach (var line in WrapTextToWidth(g, message, _monoSmall, fullW - 32))
-            {
-                g.DrawString(line, _monoSmall, Brushes.Gainsboro, contentX, headingTop);
-                headingTop += lineHeight;
-            }
-
-            if (_noEligibleBackupDrive)
-            {
-                g.DrawString("(No eligible backup drive was found - continuing with just the restore point.)",
-                    _monoSmall, Brushes.Gold, contentX, headingTop + 6);
-                headingTop += lineHeight;
-            }
-
-            var elapsed = TimeSpan.FromMilliseconds(_phaseWatch.ElapsedMilliseconds);
-            g.DrawString($"Elapsed: {elapsed:mm\\:ss}", _monoSmall, Brushes.DimGray, contentX, headingTop + 14);
-        }
-
-        private void DrawChoosePowerPlan(Graphics g, int fullX, int fullY, int fullW, int fullH, int titleHeight)
-        {
-            var contentX = fullX + 16;
-            const int lineHeight = 18;
-
-            var headingTop = fullY + titleHeight + 10 + lineHeight;
-            g.DrawString("One of the tweaks coming up sets the active power plan. Which one?",
-                _monoSmall, Brushes.Gainsboro, contentX, headingTop);
-
-            var listTop = headingTop + lineHeight + 14;
-            g.DrawString("[1] High performance - Windows' own built-in plan (recommended)",
-                _monoSmall, Brushes.Gold, contentX, listTop);
-            g.DrawString("[2] Ultimate Performance - a hidden Microsoft plan with the last few",
-                _monoSmall, Brushes.Gold, contentX, listTop + lineHeight);
-            g.DrawString("    power-saving throttles removed on top of High performance",
-                _monoSmall, Brushes.Gold, contentX, listTop + lineHeight * 2);
-
-            var noteTop = listTop + lineHeight * 3 + 14;
-            g.DrawString("Ultimate Performance is real and Microsoft-documented, just hidden by default since it",
-                _monoSmall, Brushes.DimGray, contentX, noteTop);
-            g.DrawString("has no benefit on a laptop and a small idle-power cost on a desktop that's plugged in.",
-                _monoSmall, Brushes.DimGray, contentX, noteTop + lineHeight);
-
-            var promptTop = noteTop + lineHeight * 2 + 16;
-            using var promptFont = new Font("Consolas", 14f, FontStyle.Bold);
-            g.DrawString("Choose 1 or 2", promptFont, Brushes.Gold, contentX, promptTop);
-        }
-
-        private void DrawConfirmTweaks(Graphics g, int fullX, int fullY, int fullW, int fullH, int titleHeight)
-        {
-            var contentX = fullX + 16;
-            const int lineHeight = 18;
-
-            var headingTop = fullY + titleHeight + 10 + lineHeight;
-            g.DrawString("A few optional tweaks are recommended - nothing is applied without your OK:",
-                _monoSmall, Brushes.Gainsboro, contentX, headingTop);
-
-            var listTop = headingTop + lineHeight + 10;
-            var nameWidth = _tweakPreview.Count == 0
-                ? 0f
-                : _tweakPreview.Max(t => g.MeasureString(t.Name, _monoSmall).Width) + 24;
-
-            for (int i = 0; i < _tweakPreview.Count; i++)
-            {
-                var t = _tweakPreview[i];
-                var ly = listTop + i * lineHeight;
-                g.DrawString(t.Name, _monoSmall, Brushes.Gainsboro, contentX, ly);
-                g.DrawString($"currently: {t.Current}  ->  {t.NewValue}", _monoSmall, Brushes.Gold, contentX + nameWidth, ly);
-            }
-
-            var noteTop = listTop + _tweakPreview.Count * lineHeight + 14;
-            g.DrawString("Saying yes writes an undo script (revert-tweaks.cmd) before changing anything,",
-                _monoSmall, Brushes.DimGray, contentX, noteTop);
-            g.DrawString("so every change here can be put back exactly as it was.",
-                _monoSmall, Brushes.DimGray, contentX, noteTop + lineHeight);
-
-            var promptTop = noteTop + lineHeight * 2 + 16;
-            using var promptFont = new Font("Consolas", 14f, FontStyle.Bold);
-            g.DrawString("Apply these tweaks?   [Y] Yes    [N] No, skip tweaks", promptFont, Brushes.Gold, contentX, promptTop);
-        }
-
-        private void DrawWizard(Graphics g, int fullX, int fullY, int fullW, int fullH, int titleHeight)
-        {
-            var catalog = InstallerEngine.Catalog;
-            var contentX = fullX + 16;
-            const int lineHeight = 18;
-
-            // Dropped one extra line below the title bar so the heading doesn't sit
-            // flush under it.
-            var headingTop = fullY + titleHeight + 10 + lineHeight;
-            g.DrawString("GamingStack will install the following:", _mono, Brushes.Gainsboro, contentX, headingTop);
-            var listTop = headingTop + lineHeight + 8;
-
-            var colWidth = (fullW - 32) / 2;
-
-            BuildWizardColumnsIfNeeded();
-            var columnGroups = new[] { _wizardColumn0!, _wizardColumn1! };
-
-            // Per-frame line content (text/font/brush per row, per column) - unlike the
-            // category grouping above (cached; the catalog never changes) this has to be
-            // rebuilt every frame since the wizard's own selection state does. A `null`
-            // entry is a blank spacer row (used after each category heading, so the
-            // heading doesn't visually blend into the list under it).
-            var colLines = new List<WizardLine?>[2];
-            for (int col = 0; col < 2; col++)
-            {
-                var lines = new List<WizardLine?>();
-                foreach (var (category, indices) in columnGroups[col])
-                {
-                    lines.Add(new WizardLine($"-- {category} --", _headingFont, Brushes.DeepSkyBlue));
-                    lines.Add(null);
-
-                    foreach (var i in indices)
-                    {
-                        var marker = "   ";
-                        var brush = Brushes.Gainsboro;
-
-                        if (i < _perAppDecisions.Length && _perAppDecisions[i].HasValue)
-                        {
-                            var got = _perAppDecisions[i]!.Value;
-                            marker = got ? "[x]" : "[ ]";
-                            brush = got ? Brushes.LightGreen : Brushes.Gray;
-                        }
-                        else if (_wizardPhase == WizardPhase.PerApp && i == _perAppIndex)
-                        {
-                            marker = "-->";
-                            brush = Brushes.Gold;
-                        }
-
-                        lines.Add(new WizardLine($"{marker} {catalog[i].FriendlyName}", _monoSmall, brush));
-                    }
-
-                    // Trailing blank line too, so a category's list doesn't run straight
-                    // into the next category's heading - matches the spacer already
-                    // added right after the heading above.
-                    lines.Add(null);
-                }
-                colLines[col] = lines;
-            }
-
-            var maxRowsUsed = Math.Max(colLines[0].Count, colLines[1].Count);
-            var totalChars = colLines[0].Concat(colLines[1]).Where(l => l != null).Sum(l => l!.Value.Text.Length);
-
-            // Typewriter reveal: starts once the terminal window has finished opening,
-            // and (since _stageWatch never resets while still in the Terminal stage)
-            // naturally stays fully revealed forever afterwards, including across
-            // WizardPhase changes - it only ever plays once.
-            var typingElapsedMs = Math.Max(0, _stageWatch.ElapsedMilliseconds - TerminalOpenMs);
-            var typedBudget = (int)(typingElapsedMs / 1000.0 * WizardTypeCharsPerSecond);
-            var fullyTyped = typedBudget >= totalChars;
-            var remaining = typedBudget;
-
-            (float X, float Y, string Shown, Font Font)? cursor = null;
-
-            for (int row = 0; row < maxRowsUsed; row++)
-            {
-                for (int col = 0; col < 2; col++)
-                {
-                    if (row >= colLines[col].Count) continue;
-                    var line = colLines[col][row];
-                    if (line == null) continue;
-
-                    var text = line.Value.Text;
-                    string shown;
-                    if (remaining <= 0) shown = "";
-                    else if (remaining >= text.Length) { shown = text; remaining -= text.Length; }
-                    else { shown = text[..remaining]; remaining = 0; }
-
-                    if (shown.Length == 0) continue;
-
-                    var lx = contentX + col * colWidth;
-                    var ly = listTop + row * lineHeight;
-                    g.DrawString(shown, line.Value.Font, line.Value.Brush, lx, ly);
-
-                    if (shown.Length < text.Length)
-                        cursor = (lx, ly, shown, line.Value.Font);
-                }
-            }
-
-            // Blinking cursor at wherever typing currently stands, mid-reveal.
-            if (cursor != null && (typingElapsedMs / 500) % 2 == 0)
-            {
-                var cx = cursor.Value.X + g.MeasureString(cursor.Value.Shown, cursor.Value.Font).Width;
-                g.FillRectangle(Brushes.Gainsboro, cx, cursor.Value.Y, 8, 14);
-            }
-
-            if (!fullyTyped) return;
-
-            var promptTop = listTop + maxRowsUsed * lineHeight + 16;
-            string prompt = _wizardPhase switch
-            {
-                WizardPhase.ConfirmAll => "Install everything shown above?   [Y] Yes    [N] No",
-                WizardPhase.ChooseIndividually => "Would you like to choose what's installed?   [Y] Yes    [N] No",
-                WizardPhase.PerApp => $"Install \"{catalog[_perAppIndex].FriendlyName}\"?   [Y] Yes    [N] Skip",
-                WizardPhase.ConfirmQuit => "No changes made yet. Just want to quit?   [Y] Yes    [N] No",
-                _ => ""
-            };
-
-            using var promptFont = new Font("Consolas", 14f, FontStyle.Bold);
-            g.DrawString(prompt, promptFont, Brushes.Gold, contentX, promptTop);
-        }
-
-        private void DrawInstallerLog(Graphics g, int fullX, int fullY, int fullW, int fullH, int titleHeight, long elapsed)
-        {
-            string[] linesSnapshot;
-            lock (_terminalLock) { linesSnapshot = _terminalLines.ToArray(); }
-
-            const int lineHeight = 20;
-            var contentTop = fullY + titleHeight + 10;
-            var contentBottom = fullY + fullH - 10;
-            var maxLines = Math.Max(1, (contentBottom - contentTop) / lineHeight);
-
-            var visible = linesSnapshot.Length > maxLines
-                ? linesSnapshot[^maxLines..]
-                : linesSnapshot;
-
-            var ty = contentTop;
-            foreach (var line in visible)
-            {
-                g.DrawString(line, _mono, Brushes.LimeGreen, fullX + 16, ty);
-                ty += lineHeight;
-            }
-
-            var blink = (elapsed / 500) % 2 == 0;
-            if (blink)
-            {
-                float cursorX = fullX + 16;
-                var cursorY = ty - lineHeight;
-                if (visible.Length > 0)
-                    cursorX += g.MeasureString(visible[^1], _mono).Width;
-                else
-                    cursorY = ty;
-
-                g.FillRectangle(Brushes.LimeGreen, cursorX, cursorY, 10, 16);
-            }
-        }
-
-        // Bin-packs only the categories/items that were actually attempted into two
-        // balanced columns, same greedy approach as BuildWizardColumnsIfNeeded but
-        // computed fresh each time (not cached - the wizard's full-catalog column
-        // split doesn't apply here, since most runs only attempt a subset, and
-        // reusing it left one column mostly empty while the other carried
-        // everything - the "misaligned" look from the first version of this screen).
-        // Greedy word-wrap a string to fit within maxWidth pixels for the given font -
-        // used for the summary screen's failure/skip reasons, which are free text of
-        // unpredictable length and used to just run straight off the edge of their
-        // column into whatever the neighboring column was drawing.
-        private static List<string> WrapTextToWidth(Graphics g, string text, Font font, float maxWidth)
-        {
-            var lines = new List<string>();
-            if (string.IsNullOrEmpty(text))
-            {
-                lines.Add(text ?? "");
-                return lines;
-            }
-
-            var current = "";
-            foreach (var word in text.Split(' '))
-            {
-                var candidate = current.Length == 0 ? word : current + " " + word;
-                if (current.Length > 0 && g.MeasureString(candidate, font).Width > maxWidth)
-                {
-                    lines.Add(current);
-                    current = word;
-                }
-                else
-                {
-                    current = candidate;
-                }
-            }
-            if (current.Length > 0 || lines.Count == 0) lines.Add(current);
-            return lines;
-        }
-
-        // Bin-packs only the attempted categories/items into two height-balanced
-        // columns, same idea as the wizard's own BuildWizardColumnsIfNeeded but built
-        // fresh each run since which items were attempted changes every time. Needs
-        // each item's already-wrapped detail line count (see WrapTextToWidth above) to
-        // balance accurately - a long reason wrapping to 3 lines has to count as 3 rows
-        // here, or the two columns drift out of sync with what's actually drawn and end
-        // up overlapping again exactly like before.
-        private static List<(string Category, List<int> Indices)>[] BuildSummaryColumns(
-            ItemResult[] results, Dictionary<AppEntry, List<string>> wrappedDetails)
-        {
-            var catalog = InstallerEngine.Catalog;
-
-            var groups = new List<(string Category, List<int> Indices)>();
-            for (int i = 0; i < catalog.Count; i++)
-            {
-                if (!results.Any(r => r.Entry == catalog[i])) continue;
-                var cat = catalog[i].Category;
-                var group = groups.FirstOrDefault(g => g.Category == cat);
-                if (group.Indices == null)
-                {
-                    group = (cat, new List<int>());
-                    groups.Add(group);
-                }
-                group.Indices.Add(i);
-            }
-
-            var col0 = new List<(string, List<int>)>();
-            var col1 = new List<(string, List<int>)>();
-            var height0 = 0;
-            var height1 = 0;
-            foreach (var group in groups)
-            {
-                // heading + spacer-after-heading + trailing spacer, plus one row per
-                // item and however many wrapped lines its detail text actually takes.
-                var blockHeight = 3 + group.Indices.Sum(i =>
-                    1 + (wrappedDetails.TryGetValue(catalog[i], out var lines) ? lines.Count : 0));
-                if (height0 <= height1) { col0.Add(group); height0 += blockHeight; }
-                else { col1.Add(group); height1 += blockHeight; }
-            }
-
-            return new[] { col0, col1 };
-        }
-
-        // End-of-run report: what actually happened to each selected item, grouped
-        // under category headings like the wizard's own list, but re-packed from
-        // only what was attempted (see BuildSummaryColumns) so a small selection
-        // doesn't leave one column empty and the other overflowing.
-        private void DrawSummary(Graphics g, int fullX, int fullY, int fullW, int fullH, int titleHeight)
-        {
-            var catalog = InstallerEngine.Catalog;
-            var contentX = fullX + 16;
-            const int lineHeight = 18;
-
-            ItemResult[] results;
-            lock (_itemResultLock) { results = _itemResults.ToArray(); }
-
-            var headingTop = fullY + titleHeight + 10 + lineHeight;
-            g.DrawString("Installation summary:", _mono, Brushes.Gainsboro, contentX, headingTop);
-
-            var totalsTop = headingTop + lineHeight + 4;
-            if (results.Length == 0)
-            {
-                g.DrawString("Nothing was selected - nothing was installed.", _monoSmall, Brushes.Gold, contentX, totalsTop);
-            }
-            else
-            {
-                var installed = results.Count(r => r.Kind == InstallResultKind.Installed);
-                var failed = results.Count(r => r.Kind == InstallResultKind.Failed);
-                var skipped = results.Count(r => r.Kind == InstallResultKind.Skipped);
-                g.DrawString($"{installed} installed    {failed} failed    {skipped} skipped",
-                    _monoSmall, Brushes.Gold, contentX, totalsTop);
-            }
-
-            var logLineTop = totalsTop + lineHeight + 2;
-            if (_installer.LogFilePath != null)
-                g.DrawString($"Full log: {_installer.LogFilePath}", _monoSmall, Brushes.DimGray, contentX, logLineTop);
-
-            // Tweaks are never silent - this is where the run reports exactly what
-            // happened to the "Apply these tweaks?" question, matching whatever the
-            // ConfirmTweaks screen disclosed beforehand.
-            var tweaksLineTop = logLineTop + lineHeight;
-            if (_installer.TweaksApplied)
-            {
-                g.DrawString("Tweaks: applied (see the revert script for exactly what changed)",
-                    _monoSmall, Brushes.Gold, contentX, tweaksLineTop);
-                tweaksLineTop += lineHeight;
-                if (_installer.TweaksRevertFilePath != null)
-                    g.DrawString($"  Undo them (run as Administrator): {_installer.TweaksRevertFilePath}",
-                        _monoSmall, Brushes.DimGray, contentX, tweaksLineTop);
-            }
-            else
-            {
-                g.DrawString("Tweaks: skipped - you said no", _monoSmall, Brushes.Gray, contentX, tweaksLineTop);
-            }
-
-            // Restore point + optional image backup - same "never silent" principle.
-            var backupLineTop = tweaksLineTop + lineHeight + 2;
-            if (_backup.RestorePointCreated)
-            {
-                g.DrawString("Restore point: created", _monoSmall, Brushes.Gold, contentX, backupLineTop);
-            }
-            else
-            {
-                g.DrawString($"Restore point: failed - {_backup.RestorePointError ?? "unknown reason"}",
-                    _monoSmall, Brushes.OrangeRed, contentX, backupLineTop);
-            }
-            backupLineTop += lineHeight;
-
-            switch (_backupTiming)
-            {
-                case BackupTiming.Skip:
-                    g.DrawString(_noEligibleBackupDrive
-                            ? "Image backup: skipped - no eligible drive was found"
-                            : "Image backup: skipped - you said no",
-                        _monoSmall, Brushes.Gray, contentX, backupLineTop);
-                    backupLineTop += lineHeight;
-                    break;
-                default:
-                    var timingLabel = _backupTiming == BackupTiming.Before ? "before changes" : "after setup";
-                    if (_backup.ImageBackupSucceeded)
-                    {
-                        g.DrawString($"Image backup: completed ({timingLabel}) -> {_backup.ImageBackupDestination}",
-                            _monoSmall, Brushes.Gold, contentX, backupLineTop);
-                    }
-                    else
-                    {
-                        g.DrawString($"Image backup: failed ({timingLabel}) - {_backup.ImageBackupError ?? "unknown reason"}",
-                            _monoSmall, Brushes.OrangeRed, contentX, backupLineTop);
-                    }
-                    backupLineTop += lineHeight;
-                    if (_backup.LogFilePath != null)
-                    {
-                        g.DrawString($"  Backup log: {_backup.LogFilePath}", _monoSmall, Brushes.DimGray, contentX, backupLineTop);
-                        backupLineTop += lineHeight;
-                    }
-                    break;
-            }
-
-            var listTop = backupLineTop + 10;
-            var colWidth = (fullW - 32) / 2;
-
-            // Room for the detail line's "    " indent plus a small gutter, so a long
-            // reason wraps onto extra lines within its own column instead of running
-            // straight into whatever the neighboring column is drawing.
-            var indentWidth = g.MeasureString("    ", _monoSmall).Width;
-            var detailMaxWidth = Math.Max(60f, colWidth - indentWidth - 12);
-
-            // Wrap every item's detail text once, up front - the column-balancing pass
-            // and the actual draw below both need the exact same wrapped line count, or
-            // they can disagree and the layout drifts back out of sync.
-            var wrappedDetails = new Dictionary<AppEntry, List<string>>();
-            foreach (var result in results)
-            {
-                if (result.Detail != null)
-                    wrappedDetails[result.Entry] = WrapTextToWidth(g, result.Detail, _monoSmall, detailMaxWidth);
-            }
-
-            var columnGroups = BuildSummaryColumns(results, wrappedDetails);
-            var maxRowsUsed = 0;
-
-            for (int col = 0; col < 2; col++)
-            {
-                var lx = contentX + col * colWidth;
-                var row = 0;
-
-                foreach (var (category, indices) in columnGroups[col])
-                {
-                    g.DrawString($"-- {category} --", _headingFont, Brushes.DeepSkyBlue, lx, listTop + row * lineHeight);
-                    row++;
-                    row++; // spacer after the heading, matching the wizard's spacing
-
-                    foreach (var i in indices)
-                    {
-                        var result = results.First(r => r.Entry == catalog[i]);
-                        var (marker, brush) = result.Kind switch
-                        {
-                            InstallResultKind.Installed => ("[x]", Brushes.LightGreen),
-                            InstallResultKind.Failed => ("[!]", Brushes.OrangeRed),
-                            _ => ("[-]", Brushes.Gray)
-                        };
-                        g.DrawString($"{marker} {catalog[i].FriendlyName}", _monoSmall, brush, lx, listTop + row * lineHeight);
-                        row++;
-
-                        // Show *why* it failed/was skipped right under the item, wrapped
-                        // to fit this column - so the reason is visible here instead of
-                        // buried in the scrolled-past install log or failed.txt, without
-                        // bleeding into the other column when it runs long.
-                        if (wrappedDetails.TryGetValue(catalog[i], out var detailLines))
-                        {
-                            foreach (var detailLine in detailLines)
-                            {
-                                g.DrawString($"    {detailLine}", _monoSmall, Brushes.DimGray, lx, listTop + row * lineHeight);
-                                row++;
-                            }
-                        }
-                    }
-                    row++; // spacer before the next category
-                }
-
-                maxRowsUsed = Math.Max(maxRowsUsed, row);
-            }
-
-            // Achievement tracker - just for the fun of it, not tied to what was
-            // actually attempted this run (unlike the breakdown above): every
-            // achievement that exists, and whether it's been earned across the whole
-            // session so far, not just this one run.
-            var achievementsTop = listTop + maxRowsUsed * lineHeight + 32;
-
-            HashSet<string> firedSnapshot;
-            lock (_achievementLock) { firedSnapshot = new HashSet<string>(_achievementsFired); }
-            var unlockedCount = AllAchievements.Count(a => firedSnapshot.Contains(a.Id));
-
-            g.DrawString($"-- Achievements ({unlockedCount}/{AllAchievements.Length}) --",
-                _headingFont, Brushes.DeepSkyBlue, contentX, achievementsTop);
-
-            const int achievementCols = 2;
-            var achievementColWidth = (fullW - 32) / achievementCols;
-            var achievementRowsPerCol = (AllAchievements.Length + achievementCols - 1) / achievementCols;
-            var achievementListTop = achievementsTop + lineHeight + 10;
-            var achievementDescMaxWidth = Math.Max(60f, achievementColWidth - 24);
-
-            // Each entry now takes a title row plus however many wrapped description
-            // lines it needs, so - same lesson as the per-item breakdown above - each
-            // column tracks its own running row count instead of assuming a fixed
-            // height per entry, or a long description would overlap the row below it.
-            var achievementMaxRows = 0;
-            for (int col = 0; col < achievementCols; col++)
-            {
-                var lx = contentX + col * achievementColWidth;
-                var row = 0;
-                var startIndex = col * achievementRowsPerCol;
-                var endIndex = Math.Min(AllAchievements.Length, startIndex + achievementRowsPerCol);
-
-                for (int i = startIndex; i < endIndex; i++)
-                {
-                    var achievement = AllAchievements[i];
-                    var unlocked = firedSnapshot.Contains(achievement.Id);
-                    var marker = unlocked ? "[x]" : "[ ]";
-                    var brush = unlocked ? Brushes.Gold : Brushes.Gray;
-
-                    g.DrawString($"{marker} {achievement.Title}", _monoSmall, brush,
-                        lx, achievementListTop + row * lineHeight);
-                    row++;
-
-                    var descLines = WrapTextToWidth(g, achievement.Subtitle, _monoSmall, achievementDescMaxWidth);
-                    foreach (var line in descLines)
-                    {
-                        g.DrawString($"    {line}", _monoSmall, Brushes.DimGray, lx, achievementListTop + row * lineHeight);
-                        row++;
-                    }
-
-                    row++; // spacer between achievements, so entries don't run together
-                }
-
-                achievementMaxRows = Math.Max(achievementMaxRows, row);
-            }
-
-            var promptTop = achievementListTop + achievementMaxRows * lineHeight + 16;
-            using var promptFont = new Font("Consolas", 14f, FontStyle.Bold);
-            g.DrawString("Press any key to continue...", promptFont, Brushes.Gold, contentX, promptTop);
-        }
-
-        // A little original mascot for the "didn't want to choose, didn't want to quit
-        // either" branch - a wobbling floppy disk with a speech bubble. Fully original
-        // shapes (rectangles/ellipses), not a reproduction of any real character.
-        private void DrawEasterEgg(Graphics g, int fullX, int fullY, int fullW, int fullH, int titleHeight, long elapsedMs)
-        {
-            var contentTop = fullY + titleHeight;
-            var contentHeight = fullH - titleHeight;
-            var centerX = fullX + fullW / 2;
-            var bob = (float)Math.Sin(elapsedMs / 250.0) * 6f;
-
-            const int diskW = 90, diskH = 100;
-            var diskX = centerX - diskW / 2;
-            var diskY = contentTop + contentHeight / 2 - diskH / 2 + 30 + (int)bob;
-
-            // body
-            using var bodyBrush = new SolidBrush(Color.FromArgb(40, 40, 200));
-            g.FillRectangle(bodyBrush, diskX, diskY, diskW, diskH);
-            g.DrawRectangle(Pens.Gainsboro, diskX, diskY, diskW, diskH);
-
-            // metal shutter
-            using var shutterBrush = new SolidBrush(Color.FromArgb(200, 200, 210));
-            g.FillRectangle(shutterBrush, diskX + 14, diskY, diskW - 28, 26);
-
-            // label
-            using var labelBrush = new SolidBrush(Color.FromArgb(235, 235, 245));
-            g.FillRectangle(labelBrush, diskX + 10, diskY + 36, diskW - 20, 36);
-
-            // face on the label
-            using var eyePen = new Pen(Color.Black, 3);
-            g.FillEllipse(Brushes.Black, diskX + 24, diskY + 46, 6, 6);
-            g.FillEllipse(Brushes.Black, diskX + diskW - 30, diskY + 46, 6, 6);
-            g.DrawArc(eyePen, diskX + 22, diskY + 52, diskW - 44, 16, 0, 180);
-
-            // speech bubble
-            using var bubbleFont = new Font("Consolas", 13f, FontStyle.Regular);
-            const string joke = "Big decisions, huh?\nI'm just a floppy disk and\neven I can commit to 1.44MB.";
-            var jokeSize = g.MeasureString(joke, bubbleFont);
-            var bubbleW = jokeSize.Width + 30;
-            var bubbleH = jokeSize.Height + 24;
-            var bubbleX = centerX - bubbleW / 2;
-            var bubbleY = diskY - bubbleH - 30;
-
-            using var bubbleBrush = new SolidBrush(Color.White);
-            g.FillRectangle(bubbleBrush, bubbleX, bubbleY, bubbleW, bubbleH);
-            g.DrawRectangle(Pens.Black, bubbleX, bubbleY, bubbleW, bubbleH);
-
-            // little pointer triangle from bubble down toward the disk
-            var tipX = centerX;
-            var tipY = bubbleY + bubbleH;
-            var tri = new[]
-            {
-                new PointF(tipX - 10, tipY),
-                new PointF(tipX + 10, tipY),
-                new PointF(tipX, tipY + 14)
-            };
-            g.FillPolygon(Brushes.White, tri);
-            g.DrawPolygon(Pens.Black, tri);
-
-            g.DrawString(joke, bubbleFont, Brushes.Black, bubbleX + 15, bubbleY + 12);
-        }
-
-        // The sign-off screen, styled like an old text-mode "installation complete"
-        // box - reached either after a real install finishes or after the easter egg.
-        // Fake "shutting down" outro, played dead straight in Windows 9x style: a
-        // handful of staged status lines typed out over a couple of seconds, then a
-        // full "It's now safe to turn off your computer" beat (the classic screen,
-        // framed inside our own fake terminal - a screen within the screen) before
-        // auto-advancing to Farewell. This is a beat, not a question, so it plays
-        // itself out with no keypress needed (see Advance()'s ShutdownAutoAdvanceMs).
-        private const long ShutdownLine1At = 0;
-        private const long ShutdownLine2At = 900;
-        private const long ShutdownLine3At = 1800;
-        private const long ShutdownLine4At = 3000;
-        private const long ShutdownFinalAt = 4400;
-        private const long ShutdownAutoAdvanceMs = ShutdownFinalAt + 2600;
-
-        private void DrawShuttingDown(Graphics g, int fullX, int fullY, int fullW, int fullH, int titleHeight)
-        {
-            var elapsed = _phaseWatch.ElapsedMilliseconds;
-
-            if (elapsed >= ShutdownFinalAt)
-            {
-                var contentX = fullX + 1;
-                var contentY = fullY + titleHeight + 1;
-                var contentW = fullW - 2;
-                var contentH = fullH - titleHeight - 2;
-                using var bg = new SolidBrush(Color.FromArgb(0, 0, 128)); // classic shutdown-screen navy
-                g.FillRectangle(bg, contentX, contentY, contentW, contentH);
-
-                using var bigFont = new Font("Consolas", 20f, FontStyle.Bold);
-                const string message = "It's now safe to turn off your computer.";
-                var size = g.MeasureString(message, bigFont);
-                g.DrawString(message, bigFont, Brushes.White,
-                    fullX + (fullW - size.Width) / 2, fullY + (fullH - size.Height) / 2);
-                return;
-            }
-
-            var contentX2 = fullX + 16;
-            const int lineHeight = 22;
-            var top = fullY + titleHeight + 30;
-
-            (long At, string Text)[] lines =
-            {
-                (ShutdownLine1At, "Saving your settings..."),
-                (ShutdownLine2At, "Closing GamingStack Installer..."),
-                (ShutdownLine3At, "GamingStack has finished configuring your PC."),
-                (ShutdownLine4At, "Shutting down..."),
-            };
-
-            var row = 0;
-            foreach (var (at, text) in lines)
-            {
-                if (elapsed < at) continue;
-                g.DrawString(text, _mono, Brushes.LimeGreen, contentX2, top + row * lineHeight);
-                row++;
-            }
-        }
-
-        private void DrawFarewell(Graphics g, int fullX, int fullY, int fullW, int fullH, int titleHeight)
-        {
-            using var textFont = new Font("Consolas", 13f, FontStyle.Regular);
-            using var signFont = new Font("Consolas", 13f, FontStyle.Bold);
-
-            var lines = new[]
-            {
-                ("Thank you for using my Installer stack on your", textFont, Brushes.LimeGreen),
-                ("Shiny PC, I hope you have lots of fun playing.", textFont, Brushes.LimeGreen),
-                ("", textFont, Brushes.LimeGreen),
-                ("Yours, Morpheus2n2", signFont, Brushes.Gold)
-            };
-
-            const int lineHeight = 24;
-            var maxTextWidth = lines.Max(l => g.MeasureString(l.Item1, l.Item2).Width);
-
-            const int glyphAreaHeight = 60;
-            var boxWidth = Math.Min(fullW - 60, (int)maxTextWidth + 60);
-            var boxHeight = lines.Length * lineHeight + glyphAreaHeight + 30;
-
-            var boxX = fullX + (fullW - boxWidth) / 2;
-            var boxY = fullY + titleHeight + Math.Max(10, (fullH - titleHeight - boxHeight) / 2);
-
-            using var borderPen = new Pen(Color.Cyan, 2);
-            g.DrawRectangle(borderPen, boxX, boxY, boxWidth, boxHeight);
-            // small corner accents, ASCII-box-drawing style
-            const int accent = 16;
-            g.DrawLine(borderPen, boxX, boxY, boxX + accent, boxY);
-            g.DrawLine(borderPen, boxX, boxY, boxX, boxY + accent);
-            g.DrawLine(borderPen, boxX + boxWidth, boxY, boxX + boxWidth - accent, boxY);
-            g.DrawLine(borderPen, boxX + boxWidth, boxY, boxX + boxWidth, boxY + accent);
-            g.DrawLine(borderPen, boxX, boxY + boxHeight, boxX + accent, boxY + boxHeight);
-            g.DrawLine(borderPen, boxX, boxY + boxHeight, boxX, boxY + boxHeight - accent);
-            g.DrawLine(borderPen, boxX + boxWidth, boxY + boxHeight, boxX + boxWidth - accent, boxY + boxHeight);
-            g.DrawLine(borderPen, boxX + boxWidth, boxY + boxHeight, boxX + boxWidth, boxY + boxHeight - accent);
-
-            DrawPixelHeart(g, boxX + boxWidth / 2 - 12, boxY + 16);
-
-            var ty = boxY + glyphAreaHeight;
-            foreach (var (text, font, brush) in lines)
-            {
-                if (text.Length > 0)
-                {
-                    var w = g.MeasureString(text, font).Width;
-                    g.DrawString(text, font, brush, boxX + (boxWidth - w) / 2, ty);
-                }
-                ty += lineHeight;
-            }
-        }
-
-        // A small original pixel-art heart - "have fun playing" needed a friendly
-        // little glyph and this is generic/geometric enough to carry no resemblance
-        // to any specific character or brand.
-        private static void DrawPixelHeart(Graphics g, int x, int y)
-        {
-            using var brush = new SolidBrush(Color.FromArgb(255, 90, 140));
-            const int p = 4; // pixel size
-            int[,] shape =
-            {
-                {0,1,1,0,1,1,0},
-                {1,1,1,1,1,1,1},
-                {1,1,1,1,1,1,1},
-                {0,1,1,1,1,1,0},
-                {0,0,1,1,1,0,0},
-                {0,0,0,1,0,0,0}
-            };
-            for (int row = 0; row < shape.GetLength(0); row++)
-                for (int col = 0; col < shape.GetLength(1); col++)
-                    if (shape[row, col] == 1)
-                        g.FillRectangle(brush, x + col * p, y + row * p, p, p);
-        }
-
-        // ---------- misc ----------
+        // ---------- keyboard + closing ----------
 
         protected override void OnKeyDown(KeyEventArgs e)
         {
             base.OnKeyDown(e);
+            if (WakeFromScreensaver()) return;     // the key that wakes the screensaver does nothing else
+            _lastInputTick = Environment.TickCount64;
 
             CheckKonamiCode(e.KeyCode);
+
+            if (e.KeyCode == Keys.Space && _stage is Stage.Bios or Stage.Bsod or Stage.Boot)
+            {
+                SkipIntro();
+                return;
+            }
 
             if (_stage == Stage.Bios && e.KeyCode == Keys.Delete)
             {
@@ -2685,79 +474,44 @@ namespace GamingStackGUI
                 return;
             }
 
-            if (_stage == Stage.Terminal) HandleWizardKey(e.KeyCode);
+            // The focused window gets the key first (installer wizard, Snake...).
+            if (RouteKeyToWindow(e.KeyCode)) return;
 
-            if (e.KeyCode == Keys.Escape) Close();
+            // On the desktop with nothing open, SPACE opens the installer straight away.
+            if (_stage == Stage.Desktop && e.KeyCode == Keys.Space && _windows.Count == 0)
+            {
+                EnterTerminalStage();
+                return;
+            }
+
+            if (e.KeyCode == Keys.Escape && !IsBusyPhase) Close();
         }
 
-        // ---- terminal window drag/resize ----
-        // The "window" is just a rectangle we draw, not a real child window, so moving
-        // and resizing it is hand-rolled: hit-test the title bar / grip corner on mouse
-        // down, then just mutate _termX/Y/W/H on move. Only active during the Terminal
-        // stage, and only once the open animation has actually finished positioning it
-        // (_termX etc. are seeded the first time PaintTerminal runs).
+        // While backups or installs are running, closing would kill them half-done.
+        private bool IsBusyPhase =>
+            _stage == Stage.Terminal &&
+            _wizardPhase is WizardPhase.PreparingBackup or WizardPhase.Installing or WizardPhase.RunningBackup;
 
-        protected override void OnMouseDown(MouseEventArgs e)
+        protected override void OnFormClosing(FormClosingEventArgs e)
         {
-            base.OnMouseDown(e);
-            if (_stage != Stage.Terminal || _termX == null) return;
-
-            var fullX = _termX!.Value;
-            var fullY = _termY!.Value;
-            var fullW = _termW!.Value;
-            var fullH = _termH!.Value;
-
-            var gripRect = new Rectangle(fullX + fullW - TermResizeGrip, fullY + fullH - TermResizeGrip, TermResizeGrip, TermResizeGrip);
-            var titleRect = new Rectangle(fullX, fullY, fullW, _titleBarHeight);
-
-            if (gripRect.Contains(e.Location))
+            if (IsBusyPhase && e.CloseReason == CloseReason.UserClosing)
             {
-                _resizingTerm = true;
-                _dragMouseStart = e.Location;
-                _dragTermStart = new Rectangle(fullX, fullY, fullW, fullH);
+                e.Cancel = true;
+                return;
             }
-            else if (titleRect.Contains(e.Location))
-            {
-                _draggingTerm = true;
-                _dragMouseStart = e.Location;
-                _dragTermStart = new Rectangle(fullX, fullY, fullW, fullH);
-            }
+            base.OnFormClosing(e);
         }
 
-        protected override void OnMouseMove(MouseEventArgs e)
-        {
-            base.OnMouseMove(e);
-            if (_draggingTerm)
-            {
-                var dx = e.X - _dragMouseStart.X;
-                var dy = e.Y - _dragMouseStart.Y;
-                _termX = Math.Clamp(_dragTermStart.X + dx, 0, Math.Max(0, Width - _termW!.Value));
-                _termY = Math.Clamp(_dragTermStart.Y + dy, 0, Math.Max(0, Height - _termH!.Value));
-            }
-            else if (_resizingTerm)
-            {
-                var dx = e.X - _dragMouseStart.X;
-                var dy = e.Y - _dragMouseStart.Y;
-                _termW = Math.Max(TermMinWidth, Math.Min(Width - _termX!.Value, _dragTermStart.Width + dx));
-                _termH = Math.Max(TermMinHeight, Math.Min(Height - _termY!.Value, _dragTermStart.Height + dy));
-            }
-        }
-
-        protected override void OnMouseUp(MouseEventArgs e)
-        {
-            base.OnMouseUp(e);
-            _draggingTerm = false;
-            _resizingTerm = false;
-        }
 
         protected override void OnFormClosed(FormClosedEventArgs e)
         {
             _soundPlayer?.Dispose();
+            _audio?.Dispose();
             _wallpaper?.Dispose();
-            _cloudSprite?.Dispose();
-            _sunSprite?.Dispose();
-            _hillsSprite?.Dispose();
-            _flagSheet?.Dispose();
+            _bootScene?.Dispose();
+            _biosLogo?.Dispose();
+            _icons?.Dispose();
+            _scanlineBrush?.Dispose();
             base.OnFormClosed(e);
         }
     }

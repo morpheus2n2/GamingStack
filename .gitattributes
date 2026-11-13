@@ -1,0 +1,11 @@
+# Normalise line endings so Windows/Mac/Linux checkouts don't show every line as changed.
+* text=auto
+*.cs text eol=crlf
+*.csproj text eol=crlf
+*.manifest text eol=crlf
+*.md text
+*.yml text eol=lf
+*.png binary
+*.jpg binary
+*.wav binary
+*.exe binary

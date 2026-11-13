@@ -1,10 +1,5 @@
-using System;
-using System.Collections.Generic;
 using System.Diagnostics;
-using System.IO;
-using System.Linq;
 using System.Management;
-using System.Threading.Tasks;
 
 namespace GamingStackGUI
 {
@@ -33,7 +28,6 @@ namespace GamingStackGUI
     {
         public event Action<string>? OnLog;
 
-        private readonly string _workDir = Path.Combine(Path.GetTempPath(), "GamingStack");
         private string? _logFilePath;
         public string? LogFilePath => _logFilePath;
 
@@ -59,7 +53,7 @@ namespace GamingStackGUI
             if (_logFilePath != null) return;
             try
             {
-                var logsDir = Path.Combine(_workDir, "logs");
+                var logsDir = InstallerEngine.LogsFolder;   // same Documents\GamingStack\logs folder as the install log
                 Directory.CreateDirectory(logsDir);
                 _logFilePath = Path.Combine(logsDir, $"backup_{DateTime.Now:yyyyMMdd_HHmmss}.log");
                 File.WriteAllText(_logFilePath,

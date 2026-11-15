@@ -35,8 +35,17 @@ Results for each release are recorded here, with exactly what was and was not ch
 
 | Version | SHA-256 of the released `GamingStackGUI.exe` |
 |---|---|
+| 1.8.0 | `45e0c36b6c1a268d9563f71979a243244f035f001b69298bbc1c6fe1c1be2706` |
 | 1.6.1 | `31e8f6f032873ca5ccc84f95d5ec9da112253af488e14bc563aae20c45be9627` |
 | 1.6.0 | `e0f4672a58a966177c3c24fcda4ce949374b440097b29b0cee35cbba14decd7f` |
+
+**1.8.0 release exe (scanned 2026-11-15, by the release workflow):** VirusTotal
+[full file scan](https://www.virustotal.com/gui/file/45e0c36b6c1a268d9563f71979a243244f035f001b69298bbc1c6fe1c1be2706)
+of the real 69 MB `GamingStackGUI.exe`: **1 of 65 engines flagged it** - Bkav Pro (`W32.Malware.86C0B626`), one
+of the two smaller engines that also flagged 1.6.1 (Zillya no longer does). Everything else, including Microsoft
+Defender, Kaspersky, ESET, Bitdefender, Avast, AVG, Malwarebytes, CrowdStrike and ClamAV, reported nothing. It is a
+generic heuristic label, the usual false-positive pattern for an unsigned single-file .NET program that asks for
+administrator rights.
 
 **1.6.1 release exe (scanned 2026-11-13, by the release workflow):** VirusTotal
 [full file scan](https://www.virustotal.com/gui/file/31e8f6f032873ca5ccc84f95d5ec9da112253af488e14bc563aae20c45be9627)

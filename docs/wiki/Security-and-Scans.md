@@ -23,7 +23,11 @@ Compare with the hash on the release page (and the `GamingStackGUI.exe.sha256` f
 
 Results are recorded in
 [SECURITY.md](https://github.com/morpheus2n2/GamingStack/blob/master/SECURITY.md#antivirus-scan-results).
-**1.6.1 release exe: 2 of 70 engines flagged it** (Bkav Pro and Zillya, both generic labels from smaller
+**1.8.0 release exe: 1 of 65 engines flagged it** (Bkav Pro only, a generic label; Defender, Kaspersky, ESET,
+Bitdefender, Avast, Malwarebytes and CrowdStrike found nothing). See the
+[full report](https://www.virustotal.com/gui/file/45e0c36b6c1a268d9563f71979a243244f035f001b69298bbc1c6fe1c1be2706).
+
+Earlier, **1.6.1 release exe: 2 of 70 engines flagged it** (Bkav Pro and Zillya, both generic labels from smaller
 engines; the other 68, including Microsoft Defender, Kaspersky, ESET, Bitdefender, Avast, Malwarebytes and
 CrowdStrike, found nothing). See the
 [full report](https://www.virustotal.com/gui/file/31e8f6f032873ca5ccc84f95d5ec9da112253af488e14bc563aae20c45be9627).

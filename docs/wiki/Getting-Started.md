@@ -19,9 +19,10 @@
 
 1. Watch the intro (or press **SPACE** to skip it).
 2. Choose your setup type: **1** Gaming, **2** Office, **3** Developer.
-3. Say yes to the whole list, or pick apps one at a time.
+3. Say which graphics card and processor you have, look at the full list, then tick what you want one
+   section at a time. A review screen asks "Are you sure?" before anything else happens.
 4. Choose your safety net (a restore point always happens; a full disk image is optional).
-5. Go through the tweak screens - say no to anything you are not sure about.
+5. Go through the tweak screens - untick anything you are not sure about.
 6. On the **Final Check**, read the list, type `GO` and press Enter.
 7. Watch it work. Press **C** any time to stop after the current item.
 8. Read the summary. Your log, undo script and build sheet are listed there.

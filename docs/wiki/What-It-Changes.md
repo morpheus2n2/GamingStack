@@ -39,7 +39,14 @@ value* and what it would become before you decide. Every change is written to an
 | Long file paths (over 260 characters) | on |
 | Developer Mode | on |
 
+Every tweak above is on a **tick list** on the "Windows settings" screen: each shows what it is now and
+what it would become, and you untick the ones you don't want. Only ticked ones are applied.
+
 ## Optional extras
+
+- **Captures folder** (Gaming): move where Xbox Game Bar clips (`Captures`) and Win+PrtScn screenshots
+  are saved, e.g. to a big second drive instead of OneDrive. Only new files go there; nothing existing is
+  moved or deleted. The old folders are restored by the undo script (sign out and in afterwards).
 
 - **DNS servers**: Cloudflare, Google or Quad9 for your active adapter. The old setting (automatic or
   your own servers) is saved so it can be restored. Default is "keep mine".

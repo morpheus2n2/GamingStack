@@ -8,6 +8,14 @@ namespace GamingStackGUI
     public enum AppKind { Winget, Manual, Bundle, Link }
 
     /// <summary>
+    /// Which hardware an entry is for. An NVIDIA graphics card doesn't need AMD's graphics software and vice
+    /// versa (and an AMD processor is a separate question from the graphics card), so the wizard asks which
+    /// graphics card and processor you have and hides entries for the others. Any = shown for everyone.
+    /// IntelAny = shown if you have Intel graphics OR an Intel processor.
+    /// </summary>
+    public enum HardwareTag { Any, NvidiaGpu, AmdGpu, IntelGpu, AmdCpu, IntelCpu, IntelAny }
+
+    /// <summary>
     /// Which kind of PC is being set up - picked on the first wizard screen. It decides
     /// which catalog entries are offered (<see cref="AppEntry.Profiles"/>) and which
     /// tweaks are shown for consent (gaming-only tweaks like HAGS, core parking and
@@ -60,6 +68,13 @@ namespace GamingStackGUI
         // Which setup profiles offer this entry. Defaults to Gaming only, so an entry
         // that doesn't say otherwise never shows up on an Office/Developer PC.
         public SetupProfile Profiles { get; init; } = SetupProfile.Gaming;
+        // Only offered when the user says they have this maker's hardware (see HardwareTag).
+        public HardwareTag Hardware { get; init; } = HardwareTag.Any;
+        // Entries sharing an ExclusiveGroup are pick-one: ticking one unticks the others
+        // (used for RGB/lighting programs, which fight over the same LEDs and are hard to remove).
+        public string? ExclusiveGroup { get; init; }
+        // One short plain-words line shown under the entry while it is highlighted on a section page.
+        public string? Note { get; init; }
     }
 
     /// <summary>
@@ -96,7 +111,11 @@ namespace GamingStackGUI
         DnsChoice Dns,
         IReadOnlyCollection<string> DebloatIds,
         SetupProfile Profile = SetupProfile.Gaming,
-        IReadOnlyCollection<string>? CleanupIds = null);
+        IReadOnlyCollection<string>? CleanupIds = null,
+        // Names (as shown on the tweak screen) of tweaks the user switched OFF. Empty = all on.
+        IReadOnlyCollection<string>? DisabledTweaks = null,
+        // Where to move the Windows "Captures" folder (Game Bar clips) and, optionally, Screenshots. Null = leave alone.
+        string? CapturesPath = null);
 
     /// <summary>
     /// One preinstalled app the opt-in debloat screen can offer to remove.
@@ -170,7 +189,7 @@ namespace GamingStackGUI
             // Microsoft Store listing ID (not a community winget ID) - same trick as ChatGPT below.
             new() { FriendlyName = "Xbox app (Game Pass)", Category = "Game Launchers", Kind = AppKind.Winget, WingetId = "9MV0B5HZVK9Z" },
             new() { FriendlyName = "Playnite (unifies the above)", Category = "Game Launchers", Kind = AppKind.Winget, WingetId = "Playnite.Playnite" },
-            new() { FriendlyName = "NVIDIA GeForce NOW (cloud gaming)", Category = "Game Launchers", Kind = AppKind.Winget, WingetId = "Nvidia.GeForceNow", Profiles = Gm },
+            new() { FriendlyName = "NVIDIA GeForce NOW (cloud gaming)", Category = "Game Launchers", Kind = AppKind.Winget, WingetId = "Nvidia.GeForceNow", Profiles = Gm, Hardware = HardwareTag.NvidiaGpu },
 
             // ---- Chat & meetings ----
             new() { FriendlyName = "Discord", Category = "Chat & Meetings", Kind = AppKind.Winget, WingetId = "Discord.Discord", Profiles = Gm | Dv },
@@ -191,6 +210,10 @@ namespace GamingStackGUI
             new() { FriendlyName = "Obsidian (notes)", Category = "Office & Documents", Kind = AppKind.Winget, WingetId = "Obsidian.Obsidian", Profiles = Of | Dv },
             new() { FriendlyName = "Google Drive", Category = "Office & Documents", Kind = AppKind.Winget, WingetId = "Google.GoogleDrive", Profiles = Of },
             new() { FriendlyName = "Foxit PDF Reader", Category = "Office & Documents", Kind = AppKind.Winget, WingetId = "Foxit.FoxitReader", Profiles = Of },
+            new() { FriendlyName = "ONLYOFFICE Desktop Editors (free Office-style suite)", Category = "Office & Documents", Kind = AppKind.Winget, WingetId = "ONLYOFFICE.DesktopEditors", Profiles = Of },
+            new() { FriendlyName = "Greenshot (quick screenshots with markup)", Category = "Office & Documents", Kind = AppKind.Winget, WingetId = "Greenshot.Greenshot", Profiles = Of },
+            new() { FriendlyName = "KeePassXC (offline password manager)", Category = "Office & Documents", Kind = AppKind.Winget, WingetId = "KeePassXCTeam.KeePassXC", Profiles = Of | Dv },
+            new() { FriendlyName = "Joplin (notes that sync anywhere)", Category = "Office & Documents", Kind = AppKind.Winget, WingetId = "Joplin.Joplin", Profiles = Of | Dv },
             new() { FriendlyName = "PDFgear (free PDF editor)", Category = "Office & Documents", Kind = AppKind.Winget, WingetId = "PDFgear.PDFgear", Profiles = Of },
             new() { FriendlyName = "SumatraPDF (fast, light PDF reader)", Category = "Office & Documents", Kind = AppKind.Winget, WingetId = "SumatraPDF.SumatraPDF", Profiles = Of },
             new() { FriendlyName = "Notion (notes + docs)", Category = "Office & Documents", Kind = AppKind.Winget, WingetId = "Notion.Notion", Profiles = Of },
@@ -199,7 +222,10 @@ namespace GamingStackGUI
             new() { FriendlyName = "Nextcloud Desktop", Category = "Cloud & Sync", Kind = AppKind.Winget, WingetId = "Nextcloud.NextcloudDesktop", Profiles = Of | Dv },
 
             // ---- GPU / drivers / monitoring / performance ----
-            new() { FriendlyName = "NVIDIA App", Category = "Monitoring & Performance", Kind = AppKind.Winget, WingetId = "Nvidia.App" },
+            new() { FriendlyName = "NVIDIA App (drivers, game settings, recording - opens page)", Category = "Monitoring & Performance", Kind = AppKind.Link, PageUrl = "https://www.nvidia.com/en-us/software/nvidia-app/", Hardware = HardwareTag.NvidiaGpu },
+            new() { FriendlyName = "NVIDIA Profile Inspector (advanced driver settings)", Category = "Monitoring & Performance", Kind = AppKind.Winget, WingetId = "Orbmu2k.nvidiaProfileInspector", Profiles = Gm, Hardware = HardwareTag.NvidiaGpu },
+            new() { FriendlyName = "NVCleanstall (choose which parts of an NVIDIA driver to install)", Category = "Monitoring & Performance", Kind = AppKind.Winget, WingetId = "TechPowerUp.NVCleanstall", Profiles = Gm, Hardware = HardwareTag.NvidiaGpu },
+            new() { FriendlyName = "NVIDIA Broadcast (AI mic noise removal + camera effects, opens page)", Category = "Monitoring & Performance", Kind = AppKind.Link, PageUrl = "https://www.nvidia.com/en-us/geforce/broadcasting/broadcast-app/", Profiles = Gm, Hardware = HardwareTag.NvidiaGpu },
             new() { FriendlyName = "Display Driver Uninstaller (clean GPU driver swaps)", Category = "Monitoring & Performance", Kind = AppKind.Winget, WingetId = "Wagnardsoft.DisplayDriverUninstaller" },
             new() { FriendlyName = "HWiNFO", Category = "Monitoring & Performance", Kind = AppKind.Winget, WingetId = "REALiX.HWiNFO" },
             new() { FriendlyName = "CPU-Z", Category = "Monitoring & Performance", Kind = AppKind.Winget, WingetId = "CPUID.CPU-Z" },
@@ -213,9 +239,14 @@ namespace GamingStackGUI
             new() { FriendlyName = "Process Lasso", Category = "Monitoring & Performance", Kind = AppKind.Winget, WingetId = "BitSum.ProcessLasso" },
             new() { FriendlyName = "LibreHardwareMonitor (open-source sensors)", Category = "Monitoring & Performance", Kind = AppKind.Winget, WingetId = "LibreHardwareMonitor.LibreHardwareMonitor", Profiles = Gm },
             new() { FriendlyName = "RivaTuner Statistics Server (FPS overlay engine)", Category = "Monitoring & Performance", Kind = AppKind.Winget, WingetId = "Guru3D.RTSS", Profiles = Gm },
+            new() { FriendlyName = "CrystalDiskMark (drive speed test)", Category = "Monitoring & Performance", Kind = AppKind.Winget, WingetId = "CrystalDewWorld.CrystalDiskMark", Profiles = Gm },
+            new() { FriendlyName = "FurMark (GPU stress test)", Category = "Monitoring & Performance", Kind = AppKind.Winget, WingetId = "Geeks3D.FurMark.2", Profiles = Gm },
+            new() { FriendlyName = "HWMonitor (temperatures and voltages)", Category = "Monitoring & Performance", Kind = AppKind.Winget, WingetId = "CPUID.HWMonitor", Profiles = Gm },
+            new() { FriendlyName = "Core Temp (CPU temperature)", Category = "Monitoring & Performance", Kind = AppKind.Winget, WingetId = "ALCPU.CoreTemp", Profiles = Gm },
+            new() { FriendlyName = "ThrottleStop (Intel CPU throttling control)", Category = "Monitoring & Performance", Kind = AppKind.Winget, WingetId = "TechPowerUp.ThrottleStop", Profiles = Gm, Hardware = HardwareTag.IntelCpu },
             // Microsoft's own first-party monitoring/cleanup app (labelled Beta upstream,
             // but the package installs cleanly).
-            new() { FriendlyName = "Microsoft PC Manager", Category = "Monitoring & Performance", Kind = AppKind.Winget, WingetId = "Microsoft.PCManager" },
+            new() { FriendlyName = "Microsoft PC Manager (opens page)", Category = "Monitoring & Performance", Kind = AppKind.Link, PageUrl = "https://pcmanager.microsoft.com/" },
             // No winget package exists for Cortex - Razer only ships a direct download,
             // so it is a Manual entry using Razer's own stable short link.
             new() { FriendlyName = "Razer Cortex", Category = "Monitoring & Performance", Kind = AppKind.Manual,
@@ -224,8 +255,8 @@ namespace GamingStackGUI
 
             // ---- Streaming / recording ----
             new() { FriendlyName = "OBS Studio", Category = "Streaming & Recording", Kind = AppKind.Winget, WingetId = "OBSProject.OBSStudio" },
-            new() { FriendlyName = "Streamlabs Desktop", Category = "Streaming & Recording", Kind = AppKind.Winget, WingetId = "Streamlabs.StreamlabsOBS" },
-            new() { FriendlyName = "Medal.tv", Category = "Streaming & Recording", Kind = AppKind.Winget, WingetId = "Medal.Medal" },
+            new() { FriendlyName = "Streamlabs Desktop", Category = "Streaming & Recording", Kind = AppKind.Winget, WingetId = "Streamlabs.Streamlabs" },
+            new() { FriendlyName = "Medal.tv", Category = "Streaming & Recording", Kind = AppKind.Winget, WingetId = "MedalB.V.Medal" },
             new() { FriendlyName = "Voicemeeter Banana", Category = "Streaming & Recording", Kind = AppKind.Winget, WingetId = "VB-Audio.Voicemeeter.Banana" },
             new() { FriendlyName = "Elgato Stream Deck", Category = "Streaming & Recording", Kind = AppKind.Winget, WingetId = "Elgato.StreamDeck" },
             new() { FriendlyName = "Elgato Wave Link", Category = "Streaming & Recording", Kind = AppKind.Winget, WingetId = "Elgato.WaveLink" },
@@ -234,6 +265,12 @@ namespace GamingStackGUI
             new() { FriendlyName = "Sunshine (stream games to Moonlight)", Category = "Streaming & Recording", Kind = AppKind.Winget, WingetId = "LizardByte.Sunshine" },
             new() { FriendlyName = "Moonlight (play streamed PC games)", Category = "Streaming & Recording", Kind = AppKind.Winget, WingetId = "MoonlightGameStreamingProject.Moonlight" },
             new() { FriendlyName = "Parsec (low-latency remote play)", Category = "Streaming & Recording", Kind = AppKind.Winget, WingetId = "Parsec.Parsec" },
+            new() { FriendlyName = "Elgato 4K Capture Utility (capture cards)", Category = "Streaming & Recording", Kind = AppKind.Winget, WingetId = "Elgato.4KCaptureUtility", Profiles = Gm },
+            new() { FriendlyName = "Elgato Camera Hub (webcam settings)", Category = "Streaming & Recording", Kind = AppKind.Winget, WingetId = "Elgato.CameraHub", Profiles = Gm },
+            new() { FriendlyName = "Elgato Control Center (Key Light)", Category = "Streaming & Recording", Kind = AppKind.Winget, WingetId = "Elgato.ControlCenter", Profiles = Gm },
+            new() { FriendlyName = "Streamer.bot (stream chat and alert automation)", Category = "Streaming & Recording", Kind = AppKind.Winget, WingetId = "streamerbot.streamerbot", Profiles = Gm },
+            new() { FriendlyName = "Voicemod (live voice changer, opens page)", Category = "Streaming & Recording", Kind = AppKind.Link, PageUrl = "https://www.voicemod.net/", Profiles = Gm },
+            new() { FriendlyName = "VB-Cable (virtual audio cable, opens page)", Category = "Streaming & Recording", Kind = AppKind.Link, PageUrl = "https://vb-audio.com/Cable/", Profiles = Gm },
             new() { FriendlyName = "Voicemeeter Potato (advanced audio mixer)", Category = "Streaming & Recording", Kind = AppKind.Winget, WingetId = "VB-Audio.Voicemeeter.Potato", Profiles = Gm },
 
             // ---- Developer tools ----
@@ -252,6 +289,11 @@ namespace GamingStackGUI
             new() { FriendlyName = "MobaXterm (SSH + remote tools)", Category = "Developer Tools", Kind = AppKind.Winget, WingetId = "Mobatek.MobaXterm", Profiles = Dv },
             new() { FriendlyName = "CMake", Category = "Developer Tools", Kind = AppKind.Winget, WingetId = "Kitware.CMake", Profiles = Dv },
             new() { FriendlyName = "Visual Studio 2022 Build Tools (C++/.NET compilers)", Category = "Developer Tools", Kind = AppKind.Winget, WingetId = "Microsoft.VisualStudio.2022.BuildTools", Profiles = Dv },
+            new() { FriendlyName = "Zed (fast code editor)", Category = "Developer Tools", Kind = AppKind.Winget, WingetId = "ZedIndustries.Zed", Profiles = Dv },
+            new() { FriendlyName = "Cursor (AI code editor)", Category = "Developer Tools", Kind = AppKind.Winget, WingetId = "Anysphere.Cursor", Profiles = Dv },
+            new() { FriendlyName = "Bruno (offline API client)", Category = "Developer Tools", Kind = AppKind.Winget, WingetId = "Bruno.Bruno", Profiles = Dv },
+            new() { FriendlyName = "HxD (hex editor)", Category = "Developer Tools", Kind = AppKind.Winget, WingetId = "MHNexus.HxD", Profiles = Dv },
+            new() { FriendlyName = "Android Studio", Category = "Developer Tools", Kind = AppKind.Winget, WingetId = "Google.AndroidStudio", Profiles = Dv },
 
             // ---- Command-line tools ----
             new() { FriendlyName = "lazygit (Git in the terminal)", Category = "Command-line Tools", Kind = AppKind.Winget, WingetId = "JesseDuffield.lazygit", Profiles = Dv },
@@ -271,6 +313,9 @@ namespace GamingStackGUI
             new() { FriendlyName = "Go", Category = "Languages & Runtimes", Kind = AppKind.Winget, WingetId = "GoLang.Go", Profiles = Dv },
             new() { FriendlyName = "Rust (rustup)", Category = "Languages & Runtimes", Kind = AppKind.Winget, WingetId = "Rustlang.Rustup", Profiles = Dv },
             new() { FriendlyName = "Java 21 (Temurin JDK)", Category = "Languages & Runtimes", Kind = AppKind.Winget, WingetId = "EclipseAdoptium.Temurin.21.JDK", Profiles = Dv },
+            new() { FriendlyName = "Deno (JavaScript/TypeScript runtime)", Category = "Languages & Runtimes", Kind = AppKind.Winget, WingetId = "DenoLand.Deno", Profiles = Dv },
+            new() { FriendlyName = "Bun (fast JavaScript runtime)", Category = "Languages & Runtimes", Kind = AppKind.Winget, WingetId = "Oven-sh.Bun", Profiles = Dv },
+            new() { FriendlyName = "uv (fast Python package manager)", Category = "Languages & Runtimes", Kind = AppKind.Winget, WingetId = "astral-sh.uv", Profiles = Dv },
             new() { FriendlyName = ".NET SDK 9", Category = "Languages & Runtimes", Kind = AppKind.Winget, WingetId = "Microsoft.DotNet.SDK.9", Profiles = Dv },
 
             // ---- Containers & cloud (Docker and WSL need virtualization switched on in
@@ -285,6 +330,7 @@ namespace GamingStackGUI
             new() { FriendlyName = "Bicep (Azure infrastructure)", Category = "Containers & Cloud", Kind = AppKind.Winget, WingetId = "Microsoft.Bicep", Profiles = Dv },
             new() { FriendlyName = "Vagrant", Category = "Containers & Cloud", Kind = AppKind.Winget, WingetId = "Hashicorp.Vagrant", Profiles = Dv },
             new() { FriendlyName = "Ubuntu 24.04 for WSL", Category = "Containers & Cloud", Kind = AppKind.Winget, WingetId = "Canonical.Ubuntu.2404", Profiles = Dv },
+            new() { FriendlyName = "Podman Desktop (containers without Docker)", Category = "Containers & Cloud", Kind = AppKind.Winget, WingetId = "RedHat.Podman-Desktop", Profiles = Dv },
 
             // ---- Home lab & network ----
             new() { FriendlyName = "Tailscale (private network)", Category = "Home Lab & Network", Kind = AppKind.Winget, WingetId = "Tailscale.Tailscale", Profiles = Dv },
@@ -299,11 +345,13 @@ namespace GamingStackGUI
             new() { FriendlyName = "WireGuard (VPN)", Category = "Home Lab & Network", Kind = AppKind.Winget, WingetId = "WireGuard.WireGuard", Profiles = Dv },
             new() { FriendlyName = "Nmap (network scanner)", Category = "Home Lab & Network", Kind = AppKind.Winget, WingetId = "Insecure.Nmap", Profiles = Dv },
             new() { FriendlyName = "Advanced IP Scanner", Category = "Home Lab & Network", Kind = AppKind.Winget, WingetId = "Famatech.AdvancedIPScanner", Profiles = Dv },
+            new() { FriendlyName = "Angry IP Scanner", Category = "Home Lab & Network", Kind = AppKind.Winget, WingetId = "angryziber.AngryIPScanner", Profiles = Dv },
+            new() { FriendlyName = "Syncthing (private file sync)", Category = "Home Lab & Network", Kind = AppKind.Winget, WingetId = "Syncthing.Syncthing", Profiles = Dv },
 
             // ---- General utilities ----
             new() { FriendlyName = "VS Code", Category = "General Utilities", Kind = AppKind.Winget, WingetId = "Microsoft.VisualStudioCode", Profiles = Everyone },
             new() { FriendlyName = "PowerShell 7", Category = "General Utilities", Kind = AppKind.Winget, WingetId = "Microsoft.PowerShell", Profiles = Gm | Dv },
-            new() { FriendlyName = "Python 3", Category = "General Utilities", Kind = AppKind.Winget, WingetId = "Python.Python.3", Profiles = Gm | Dv },
+            new() { FriendlyName = "Python 3", Category = "General Utilities", Kind = AppKind.Winget, WingetId = "Python.Python.3.13", Profiles = Gm | Dv },
             new() { FriendlyName = "PowerToys", Category = "General Utilities", Kind = AppKind.Winget, WingetId = "Microsoft.PowerToys", Profiles = Everyone },
             new() { FriendlyName = "VLC Media Player", Category = "General Utilities", Kind = AppKind.Winget, WingetId = "VideoLAN.VLC", Profiles = Everyone },
             new() { FriendlyName = "7-Zip", Category = "General Utilities", Kind = AppKind.Winget, WingetId = "7zip.7zip", Profiles = Everyone },
@@ -326,6 +374,10 @@ namespace GamingStackGUI
             new() { FriendlyName = "Rainmeter (desktop widgets)", Category = "Customisation & Mods", Kind = AppKind.Winget, WingetId = "Rainmeter.Rainmeter", Profiles = Gm },
             new() { FriendlyName = "Lively Wallpaper (animated wallpapers)", Category = "Customisation & Mods", Kind = AppKind.Winget, WingetId = "rocksdanister.LivelyWallpaper", Profiles = Gm },
             new() { FriendlyName = "Mod Organizer 2", Category = "Customisation & Mods", Kind = AppKind.Winget, WingetId = "ModOrganizer2.modorganizer", Profiles = Gm },
+            new() { FriendlyName = "ReShade (post-processing filters for games)", Category = "Customisation & Mods", Kind = AppKind.Winget, WingetId = "Reshade.Setup", Profiles = Gm },
+            new() { FriendlyName = "Special K (frame pacing, HDR and game fixes)", Category = "Customisation & Mods", Kind = AppKind.Winget, WingetId = "SpecialK.SpecialK", Profiles = Gm },
+            new() { FriendlyName = "Overwolf (in-game overlay apps, opens page)", Category = "Customisation & Mods", Kind = AppKind.Link, PageUrl = "https://www.overwolf.com/", Profiles = Gm },
+            new() { FriendlyName = "Lossless Scaling (frame generation, opens its Steam page)", Category = "Customisation & Mods", Kind = AppKind.Link, PageUrl = "https://store.steampowered.com/app/993090/Lossless_Scaling/", Profiles = Gm },
             new() { FriendlyName = "Vortex Mod Manager", Category = "General Utilities", Kind = AppKind.Winget, WingetId = "NexusMods.Vortex" },
 
             // ---- Redistributables - the entries everyone should just say yes to. A
@@ -348,19 +400,30 @@ namespace GamingStackGUI
             // older games still ask for and Windows 11 doesn't ship.
             new() { FriendlyName = "DirectX End-User Runtime (older game DLLs)", Category = "Redistributables", Kind = AppKind.Winget, WingetId = "Microsoft.DirectX" },
 
-            // ---- RGB / peripheral ecosystems - manufacturer control software. Nobody
-            // owns all of these, so they're skippable. OpenRGB and SignalRGB are the odd
+            // ---- Deep uninstallers: remove a program AND the folders, registry entries and leftovers
+            // it leaves behind (the normal Windows uninstaller doesn't). ----
+            new() { FriendlyName = "Bulk Crap Uninstaller (deep uninstaller, finds leftovers)", Category = "Uninstall & Clean-up Tools", Kind = AppKind.Winget, WingetId = "Klocman.BulkCrapUninstaller", Profiles = Everyone, Note = "Free, open-source. Removes many programs at once and scans for leftover files and registry entries." },
+            new() { FriendlyName = "Revo Uninstaller Free (deep uninstaller)", Category = "Uninstall & Clean-up Tools", Kind = AppKind.Winget, WingetId = "RevoUninstaller.RevoUninstaller", Profiles = Everyone, Note = "Watches an uninstall, then scans for what it left behind. The free version is enough for most people." },
+            new() { FriendlyName = "Geek Uninstaller (small, fast uninstaller)", Category = "Uninstall & Clean-up Tools", Kind = AppKind.Winget, WingetId = "GeekUninstaller.GeekUninstaller", Profiles = Everyone, Note = "A tiny portable uninstaller with a forced-removal option for stubborn programs." },
+            new() { FriendlyName = "BleachBit (clears junk and temporary files)", Category = "Uninstall & Clean-up Tools", Kind = AppKind.Winget, WingetId = "BleachBit.BleachBit", Profiles = Everyone, Note = "Open-source cleaner for temporary files, caches and logs. It shows what it will remove before it does." },
+            new() { FriendlyName = "WinDirStat (what is filling your drive)", Category = "Uninstall & Clean-up Tools", Kind = AppKind.Winget, WingetId = "WinDirStat.WinDirStat", Profiles = Everyone },
+
+            // ---- RGB / peripheral ecosystems - manufacturer control software. The lighting
+            // programs (ExclusiveGroup = "lighting") are PICK-ONE: running several fights over the same
+            // LEDs and they are hard to remove cleanly. Nobody owns all of these, so they're skippable. OpenRGB and SignalRGB are the odd
             // ones out: single apps that talk to hardware from many vendors at once. ----
-            new() { FriendlyName = "Corsair iCUE", Category = "RGB & Peripheral Control", Kind = AppKind.Winget, WingetId = "Corsair.iCUE.4" },
+            new() { FriendlyName = "Corsair iCUE", Category = "RGB & Peripheral Control", Kind = AppKind.Winget, WingetId = "Corsair.iCUE.4", ExclusiveGroup = "lighting" },
             // Synapse 4 is the current version (the old "Razer.Synapse.3" ID doesn't exist).
-            new() { FriendlyName = "Razer Synapse", Category = "RGB & Peripheral Control", Kind = AppKind.Winget, WingetId = "RazerInc.RazerInstaller.Synapse4" },
-            new() { FriendlyName = "Logitech G HUB", Category = "RGB & Peripheral Control", Kind = AppKind.Winget, WingetId = "Logitech.GHUB" },
-            new() { FriendlyName = "SteelSeries GG", Category = "RGB & Peripheral Control", Kind = AppKind.Winget, WingetId = "SteelSeries.GG" },
-            new() { FriendlyName = "OpenRGB (universal, multi-vendor)", Category = "RGB & Peripheral Control", Kind = AppKind.Winget, WingetId = "OpenRGB.OpenRGB" },
-            new() { FriendlyName = "SignalRGB (universal, multi-vendor)", Category = "RGB & Peripheral Control", Kind = AppKind.Winget, WingetId = "WhirlwindFX.SignalRgb" },
-            new() { FriendlyName = "Hyte Nexus (HYTE case/AIO control)", Category = "RGB & Peripheral Control", Kind = AppKind.Manual,
+            new() { FriendlyName = "Razer Synapse", Category = "RGB & Peripheral Control", Kind = AppKind.Winget, WingetId = "RazerInc.RazerInstaller.Synapse4", ExclusiveGroup = "lighting" },
+            new() { FriendlyName = "Logitech G HUB", Category = "RGB & Peripheral Control", Kind = AppKind.Winget, WingetId = "Logitech.GHUB", ExclusiveGroup = "lighting" },
+            new() { FriendlyName = "SteelSeries GG", Category = "RGB & Peripheral Control", Kind = AppKind.Winget, WingetId = "SteelSeries.GG", ExclusiveGroup = "lighting" },
+            new() { FriendlyName = "OpenRGB (universal, multi-vendor)", Category = "RGB & Peripheral Control", Kind = AppKind.Winget, WingetId = "OpenRGB.OpenRGB", ExclusiveGroup = "lighting" },
+            new() { FriendlyName = "SignalRGB (universal, multi-vendor)", Category = "RGB & Peripheral Control", Kind = AppKind.Winget, WingetId = "WhirlwindFX.SignalRgb", ExclusiveGroup = "lighting" },
+            new() { FriendlyName = "NZXT CAM (NZXT cooling + lighting control)", Category = "RGB & Peripheral Control", Kind = AppKind.Winget, WingetId = "NZXT.CAM", Profiles = Gm, ExclusiveGroup = "lighting" },
+            new() { FriendlyName = "Logitech Options+ (MX mice and keyboards)", Category = "RGB & Peripheral Control", Kind = AppKind.Winget, WingetId = "Logitech.OptionsPlus", Profiles = Gm | Of },
+            new() { FriendlyName = "Hyte Nexus (HYTE case/AIO control)", Category = "RGB & Peripheral Control", Kind = AppKind.Manual, ExclusiveGroup = "lighting",
                     ManualFileName = "HyteNexusInstaller.exe", ManualUrl = "https://hyte.co/nexus-download", PageUrl = "https://hyte.com/" },
-            new() { FriendlyName = "L-Connect 3 (Lian Li fan/lighting control)", Category = "RGB & Peripheral Control", Kind = AppKind.Manual,
+            new() { FriendlyName = "L-Connect 3 (Lian Li fan/lighting control)", Category = "RGB & Peripheral Control", Kind = AppKind.Manual, ExclusiveGroup = "lighting",
                     ManualFileName = "LConnect3.zip",
                     ManualUrl = "https://lianli-update-2025.lianli-cn.com/L3_CX/20260422-L-Connect%203-x64-v2.1.20-fde9a570.zip", PageUrl = "https://lian-li.com/l-connect3/" },
 
@@ -373,10 +436,28 @@ namespace GamingStackGUI
             new() { FriendlyName = "DOSBox-X (old DOS games)", Category = "Retro Computing", Kind = AppKind.Winget, WingetId = "joncampbell123.DOSBox-X", Profiles = Gm },
             new() { FriendlyName = "ScummVM (classic point-and-click adventures)", Category = "Retro Computing", Kind = AppKind.Winget, WingetId = "ScummVM.ScummVM", Profiles = Gm },
 
+            // ---- Game console emulators. Legal to install; you supply your own games and any BIOS files
+            // (dumped from consoles you own). GamingStack never downloads games. ----
+            new() { FriendlyName = "Dolphin (GameCube and Wii)", Category = "Console Emulators (bring your own games)", Kind = AppKind.Winget, WingetId = "DolphinEmulator.Dolphin", Profiles = Gm },
+            new() { FriendlyName = "DuckStation (PlayStation 1)", Category = "Console Emulators (bring your own games)", Kind = AppKind.Winget, WingetId = "Stenzek.DuckStation", Profiles = Gm },
+            new() { FriendlyName = "PPSSPP (PlayStation Portable)", Category = "Console Emulators (bring your own games)", Kind = AppKind.Winget, WingetId = "PPSSPPTeam.PPSSPP", Profiles = Gm },
+            new() { FriendlyName = "Cemu (Wii U)", Category = "Console Emulators (bring your own games)", Kind = AppKind.Winget, WingetId = "Cemu.Cemu", Profiles = Gm },
+            new() { FriendlyName = "melonDS (Nintendo DS)", Category = "Console Emulators (bring your own games)", Kind = AppKind.Winget, WingetId = "melonDS.melonDS", Profiles = Gm },
+            new() { FriendlyName = "Azahar (Nintendo 3DS)", Category = "Console Emulators (bring your own games)", Kind = AppKind.Winget, WingetId = "AzaharEmu.Azahar", Profiles = Gm },
+            new() { FriendlyName = "mGBA (Game Boy, Game Boy Color, Game Boy Advance)", Category = "Console Emulators (bring your own games)", Kind = AppKind.Winget, WingetId = "JeffreyPfau.mGBA", Profiles = Gm },
+            new() { FriendlyName = "xemu (original Xbox)", Category = "Console Emulators (bring your own games)", Kind = AppKind.Winget, WingetId = "xemu-project.xemu", Profiles = Gm },
+            new() { FriendlyName = "MAME (arcade machines)", Category = "Console Emulators (bring your own games)", Kind = AppKind.Winget, WingetId = "MAMEdev.MAME", Profiles = Gm },
+            new() { FriendlyName = "RPCS3 (PlayStation 3, opens download page)", Category = "Console Emulators (bring your own games)", Kind = AppKind.Link, PageUrl = "https://rpcs3.net/download", Profiles = Gm },
+            new() { FriendlyName = "Flycast (Dreamcast and Naomi, opens download page)", Category = "Console Emulators (bring your own games)", Kind = AppKind.Link, PageUrl = "https://github.com/flyinghead/flycast/releases", Profiles = Gm },
+            new() { FriendlyName = "EmulationStation Desktop Edition (one front-end for all your emulators)", Category = "Console Emulators (bring your own games)", Kind = AppKind.Winget, WingetId = "ES-DE.EmulationStation-DE", Profiles = Gm },
+            new() { FriendlyName = "LaunchBox (game library front-end, opens download page)", Category = "Console Emulators (bring your own games)", Kind = AppKind.Link, PageUrl = "https://www.launchbox-app.com/download", Profiles = Gm },
+
             // ---- Vendor software with no winget package: these open the vendor's own page in your
             // default browser and you install from there. ----
-            new() { FriendlyName = "AMD Software: Adrenalin (opens download page)", Category = "Drivers & Vendor Software", Kind = AppKind.Link, PageUrl = "https://www.amd.com/en/support/download/drivers.html", Profiles = Gm },
-            new() { FriendlyName = "Intel Driver & Support Assistant (opens page)", Category = "Drivers & Vendor Software", Kind = AppKind.Link, PageUrl = "https://www.intel.com/content/www/us/en/support/detect.html", Profiles = Everyone },
+            new() { FriendlyName = "AMD Software: Adrenalin (opens download page)", Category = "Drivers & Vendor Software", Kind = AppKind.Link, PageUrl = "https://www.amd.com/en/support/download/drivers.html", Profiles = Gm, Hardware = HardwareTag.AmdGpu },
+            new() { FriendlyName = "AMD Ryzen Master (Ryzen tuning, opens download page)", Category = "Drivers & Vendor Software", Kind = AppKind.Link, PageUrl = "https://www.amd.com/en/products/software/ryzen-master.html", Profiles = Gm, Hardware = HardwareTag.AmdCpu },
+            new() { FriendlyName = "AMD Chipset Drivers (Ryzen motherboards, opens download page)", Category = "Drivers & Vendor Software", Kind = AppKind.Link, PageUrl = "https://www.amd.com/en/support/download/drivers.html", Profiles = Gm, Hardware = HardwareTag.AmdCpu },
+            new() { FriendlyName = "Intel Driver & Support Assistant (opens page)", Category = "Drivers & Vendor Software", Kind = AppKind.Link, PageUrl = "https://www.intel.com/content/www/us/en/support/detect.html", Profiles = Everyone, Hardware = HardwareTag.IntelAny },
             new() { FriendlyName = "MSI Center (opens download page)", Category = "Drivers & Vendor Software", Kind = AppKind.Link, PageUrl = "https://www.msi.com/Landing/MSI-Center", Profiles = Gm },
             new() { FriendlyName = "ASUS Armoury Crate (opens download page)", Category = "Drivers & Vendor Software", Kind = AppKind.Link, PageUrl = "https://rog.asus.com/armoury-crate/", Profiles = Gm },
             new() { FriendlyName = "Cinebench (opens download page)", Category = "Drivers & Vendor Software", Kind = AppKind.Link, PageUrl = "https://www.maxon.net/en/cinebench", Profiles = Gm },
@@ -522,6 +603,9 @@ namespace GamingStackGUI
         // switchable copy of it (Windows doesn't let you activate the hidden
         // template directly on modern builds - it has to be duplicated first).
         private const string UltimatePerformanceTemplateGuid = "e9a42b02-d5df-448d-aa00-03f14749eb61";
+
+        public const string CapturesTweakName = "Captures folder (Game Bar clips)";
+        public const string ScreenshotsTweakName = "Screenshots folder (Win+PrtScn)";
 
         public static List<TweakPreview> PreviewTweaks(TweakOptions options)
         {
@@ -729,6 +813,12 @@ namespace GamingStackGUI
                 list.Add(new TweakPreview("Telemetry (DiagTrack service)", current, "disabled"));
             }
             catch { list.Add(new TweakPreview("Telemetry (DiagTrack service)", "unknown", "disabled")); }
+
+            if (!string.IsNullOrWhiteSpace(options.CapturesPath))
+            {
+                list.Add(new TweakPreview(CapturesTweakName, CapturesFolder.GetPath(CapturesFolder.CapturesId) ?? "unknown", options.CapturesPath!));
+                list.Add(new TweakPreview(ScreenshotsTweakName, CapturesFolder.GetPath(CapturesFolder.ScreenshotsId) ?? "unknown", CapturesFolder.ScreenshotsFor(options.CapturesPath!)));
+            }
 
             if (developer)
             {
@@ -1478,6 +1568,8 @@ namespace GamingStackGUI
             {
                 sb.AppendLine($"  power plan   {options.PowerPlan}");
                 sb.AppendLine($"  DNS          {options.Dns}");
+                sb.AppendLine($"  switched off {(options.DisabledTweaks is not { Count: > 0 } ? "nothing" : string.Join(", ", options.DisabledTweaks))}");
+                sb.AppendLine($"  captures to  {(string.IsNullOrWhiteSpace(options.CapturesPath) ? "unchanged" : options.CapturesPath)}");
                 sb.AppendLine($"  cleanup      {(options.CleanupIds is not { Count: > 0 } ? "none" : string.Join(", ", options.CleanupIds))}");
                 sb.AppendLine($"  removals     {(options.DebloatIds.Count == 0 ? "none" : string.Join(", ", options.DebloatIds))}");
             }
@@ -1937,8 +2029,9 @@ namespace GamingStackGUI
             var gaming = options.Profile == SetupProfile.Gaming;
             var developer = options.Profile == SetupProfile.Developer;
             var revertLines = EnsureRevert();
+            bool Want(string tweakName) => options.DisabledTweaks?.Contains(tweakName) != true;
 
-            if (gaming) try
+            if (gaming && Want("Game Mode")) try
             {
                 using var readKey = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\GameBar");
                 var existing = readKey?.GetValue("AllowAutoGameMode");
@@ -1959,7 +2052,7 @@ namespace GamingStackGUI
                 Fail($"Game Mode tweak failed: {ex.Message}");
             }
 
-            if (gaming) try
+            if (gaming && Want("Hardware-accelerated GPU scheduling")) try
             {
                 using var readKey = Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Control\GraphicsDrivers");
                 var existing = readKey?.GetValue("HwSchMode");
@@ -1980,7 +2073,7 @@ namespace GamingStackGUI
                 Fail($"HAGS tweak failed: {ex.Message}");
             }
 
-            if (gaming) try
+            if (gaming && Want("Power plan")) try
             {
                 var (previousGuid, previousName) = GetActivePowerScheme();
 
@@ -2034,7 +2127,7 @@ namespace GamingStackGUI
                 Fail($"Power plan tweak failed: {ex.Message}");
             }
 
-            try
+            if (Want("File extensions")) try
             {
                 using var readKey = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced");
                 var existing = readKey?.GetValue("HideFileExt");
@@ -2055,7 +2148,7 @@ namespace GamingStackGUI
                 Fail($"File extensions tweak failed: {ex.Message}");
             }
 
-            try
+            if (Want("Hidden files")) try
             {
                 using var readKey = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced");
                 var existing = readKey?.GetValue("Hidden");
@@ -2076,7 +2169,7 @@ namespace GamingStackGUI
                 Fail($"Hidden files tweak failed: {ex.Message}");
             }
 
-            try
+            if (Want("Right-click context menu")) try
             {
                 var alreadyExisted = Registry.CurrentUser.OpenSubKey(ClassicContextMenuKeyPath) != null;
 
@@ -2095,7 +2188,7 @@ namespace GamingStackGUI
                 Fail($"Classic context menu tweak failed: {ex.Message}");
             }
 
-            try
+            if (Want("Taskbar widgets button")) try
             {
                 using var readKey = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced");
                 var existing = readKey?.GetValue("TaskbarDa");
@@ -2116,7 +2209,7 @@ namespace GamingStackGUI
                 Fail($"Taskbar widgets tweak failed: {ex.Message}");
             }
 
-            try
+            if (Want("Taskbar search box")) try
             {
                 using var readKey = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Search");
                 var existing = readKey?.GetValue("SearchboxTaskbarMode");
@@ -2137,7 +2230,7 @@ namespace GamingStackGUI
                 Fail($"Taskbar search box tweak failed: {ex.Message}");
             }
 
-            try
+            if (Want("Taskbar Copilot button")) try
             {
                 using var readKey = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced");
                 var existing = readKey?.GetValue("ShowCopilotButton");
@@ -2158,7 +2251,7 @@ namespace GamingStackGUI
                 Fail($"Taskbar Copilot button tweak failed: {ex.Message}");
             }
 
-            if (gaming) try
+            if (gaming && Want("Background task CPU reservation (MMCSS)")) try
             {
                 using var readKey = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile");
                 var existing = readKey?.GetValue("SystemResponsiveness");
@@ -2179,7 +2272,7 @@ namespace GamingStackGUI
                 Fail($"MMCSS tweak failed: {ex.Message}");
             }
 
-            try
+            if (Want("Start menu suggestions/ads")) try
             {
                 using var readKey = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager");
                 var existingSuggestions = readKey?.GetValue("SystemPaneSuggestionsEnabled");
@@ -2204,7 +2297,7 @@ namespace GamingStackGUI
                 Fail($"Start menu suggestions tweak failed: {ex.Message}");
             }
 
-            if (gaming) try
+            if (gaming && Want("Fast Startup")) try
             {
                 using var readKey = Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Control\Session Manager\Power");
                 var existing = readKey?.GetValue("HiberbootEnabled");
@@ -2225,7 +2318,7 @@ namespace GamingStackGUI
                 Fail($"Fast Startup tweak failed: {ex.Message}");
             }
 
-            if (gaming) try
+            if (gaming && Want("Windows Update active hours")) try
             {
                 using var readKey = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\WindowsUpdate\UX\Settings");
                 var existingStart = readKey?.GetValue("ActiveHoursStart");
@@ -2251,7 +2344,7 @@ namespace GamingStackGUI
                 Fail($"Windows Update active hours tweak failed: {ex.Message}");
             }
 
-            if (gaming) try
+            if (gaming && Want("Xbox Game Bar / Game DVR")) try
             {
                 using var readKey = Registry.CurrentUser.OpenSubKey(@"System\GameConfigStore");
                 var existing = readKey?.GetValue("GameDVR_Enabled");
@@ -2272,7 +2365,7 @@ namespace GamingStackGUI
                 Fail($"Game DVR tweak failed: {ex.Message}");
             }
 
-            if (gaming) try
+            if (gaming && Want("Network latency (Nagle's algorithm)")) try
             {
                 var ifacePath = GetActiveNetworkInterfaceRegistryPath();
                 if (ifacePath == null)
@@ -2307,7 +2400,7 @@ namespace GamingStackGUI
                 Fail($"Network latency tweak failed: {ex.Message}");
             }
 
-            if (gaming) try
+            if (gaming && Want("Mouse acceleration (\"Enhance pointer precision\")")) try
             {
                 using var readKey = Registry.CurrentUser.OpenSubKey(@"Control Panel\Mouse");
                 var existingSpeed = readKey?.GetValue("MouseSpeed") as string;
@@ -2342,7 +2435,7 @@ namespace GamingStackGUI
                 Fail($"Mouse acceleration tweak failed: {ex.Message}");
             }
 
-            if (gaming) try
+            if (gaming && Want("CPU core parking (minimum unparked)")) try
             {
                 var (existingAc, existingDc) = GetPowerSettingValueIndex("SCHEME_CURRENT", CoreParkingSubgroupGuid, CoreParkingSettingGuid);
 
@@ -2367,7 +2460,7 @@ namespace GamingStackGUI
                 Fail($"CPU core parking tweak failed: {ex.Message}");
             }
 
-            if (gaming) try
+            if (gaming && Want("Foreground app priority (Win32PrioritySeparation)")) try
             {
                 using var readKey = Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Control\PriorityControl");
                 var existing = readKey?.GetValue("Win32PrioritySeparation");
@@ -2388,7 +2481,7 @@ namespace GamingStackGUI
                 Fail($"Foreground app priority tweak failed: {ex.Message}");
             }
 
-            try
+            if (Want("Delivery Optimization (P2P update sharing)")) try
             {
                 using var readKey = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Policies\Microsoft\Windows\DeliveryOptimization");
                 var existing = readKey?.GetValue("DODownloadMode");
@@ -2409,7 +2502,7 @@ namespace GamingStackGUI
                 Fail($"Delivery Optimization tweak failed: {ex.Message}");
             }
 
-            try
+            if (Want("Telemetry (DiagTrack service)")) try
             {
                 using var readKey = Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Services\DiagTrack");
                 var existing = readKey?.GetValue("Start");
@@ -2437,11 +2530,39 @@ namespace GamingStackGUI
                 Fail($"Telemetry tweak failed: {ex.Message}");
             }
 
+            // Captures / Screenshots folders: only when the user picked a location. Existing files are
+            // left where they are; only where NEW captures go changes.
+            if (!string.IsNullOrWhiteSpace(options.CapturesPath))
+            {
+                foreach (var (tweakName, id, target) in new[]
+                {
+                    (CapturesTweakName, CapturesFolder.CapturesId, options.CapturesPath!),
+                    (ScreenshotsTweakName, CapturesFolder.ScreenshotsId, CapturesFolder.ScreenshotsFor(options.CapturesPath!))
+                })
+                {
+                    if (!Want(tweakName)) continue;
+                    try
+                    {
+                        var was = CapturesFolder.GetPath(id) ?? "unknown";
+                        revertLines.Add($"REM {tweakName} (sign out and back in after running this)");
+                        revertLines.Add(CapturesFolder.UndoLine(id));
+                        revertLines.Add("");
+
+                        CapturesFolder.Move(id, target);
+                        Log($"[tweaks] {tweakName}: {target} (was: {was}) - files already in the old folder were left where they are");
+                    }
+                    catch (Exception ex)
+                    {
+                        Fail($"{tweakName} tweak failed: {ex.Message}");
+                    }
+                }
+            }
+
             // Developer-profile tweaks. Same pattern as every other tweak: read the real
             // current value, write the undo line first, then change it.
             if (developer)
             {
-                try
+                if (Want("Long file paths (over 260 characters)")) try
                 {
                     const string fsPath = @"SYSTEM\CurrentControlSet\Control\FileSystem";
                     using var readKey = Registry.LocalMachine.OpenSubKey(fsPath);
@@ -2462,7 +2583,7 @@ namespace GamingStackGUI
                     Fail($"Long file paths tweak failed: {ex.Message}");
                 }
 
-                try
+                if (Want("Developer Mode")) try
                 {
                     const string devPath = @"SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock";
                     using var readKey = Registry.LocalMachine.OpenSubKey(devPath);

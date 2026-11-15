@@ -12,7 +12,7 @@ maximum nostalgia.
 The project uses [Semantic Versioning](https://semver.org/), tracked in
 `GamingStackGUI.csproj` (`<Version>`/`<AssemblyVersion>`/`<FileVersion>`)
 and mirrored as a `## [x.y.z] - ...` heading at the top of `CHANGELOG.md`.
-The project is at **1.7.0**. Rules for bumping (they were written under
+The project is at **1.8.0**. Rules for bumping (they were written under
 `0.y.z` and still apply the same way):
 - **Bump the minor version** (`0.6.x` → `0.7.0`) for a change that adds a
   feature - a new wizard behavior, a new catalog category, a new stage.
@@ -120,16 +120,12 @@ Bios -> Boot -> Desktop -> Terminal (ChooseProfile first); SPACE skips Bios/Boot
     tweaks are gated in `PreviewTweaks`/`ApplyTweaks` by `options.Profile`;
     Developer adds long paths + Developer Mode, both with preview and undo line.
     Any new tweak must still follow preview -> consent -> apply -> revert.
-  - `ConfirmAll` shows the full `InstallerEngine.Catalog` (friendly
-    names, grouped under a heading per `Category` - see
-    `BuildWizardColumnsIfNeeded`/`DrawWizard`) and asks Y/N to install
-    everything.
-  - `N` -> `ChooseIndividually` asks whether to pick items one at a time;
-    `Y` -> `PerApp` walks the catalog asking Y/N per entry, building
-    `_selectedApps` and showing a live checklist (`_perAppDecisions`).
-  - `N` to choosing individually -> `ConfirmQuit`; `Y` closes the app,
-    `N` -> `EasterEgg` (an original wobbling floppy-disk mascot, 5s) then
-    `Farewell`.
+  - `ConfirmAll` shows the full catalog for the setup type (friendly names under a heading per `Category`,
+    `BuildWizardColumnsIfNeeded`/`DrawWizard`) read-only, with "Start the guided setup? Y/N" (1.8.0; the old "install everything" Y is gone). Before it, `ChooseHardware` asks which graphics card / processor makers
+    you have (`HardwareTag` on `AppEntry` hides the rest). Y -> `PickSection` (one page per category,
+    arrows + SPACE; `ExclusiveGroup` entries are pick-one) -> `ReviewSelection` ("Are you sure?").
+    `N` -> `ConfirmQuit`; `Y` closes the app, `N` -> `EasterEgg` (an original wobbling floppy-disk mascot,
+    5s) then `Farewell`.
   - Once a selection is made (full catalog or a hand-picked subset, even if
     empty), both paths route through `GoToConfirmBackup()` rather than
     straight to `StartInstall()` - see Restore point/backup below for that
@@ -210,6 +206,11 @@ the shell draws the chrome and calls `DrawClient`/`OnKey`/`OnTick`.
 - `MainForm` is split by topic: `MainForm.cs` (state, ctor, stage loop, keys), `.Intro.cs` (BIOS,
   boot, wallpaper), `.Wizard.cs` (flow + every wizard screen), `.Finale.cs` (summary and ending),
   `.Achievements.cs`, `.Shell.cs`, `.Apps.cs`, `.Tools.cs`.
+- **Per-tweak choice + Captures (1.8.0)**: `ConfirmTweaks` is a tick list (`MainForm.Sections.cs`); every
+  tweak block in `ApplyTweaks` is gated with `Want("<preview name>")`, so a new tweak needs its preview row
+  name and the same gate. Names starting `Cleanup:`, `Remove app:`, `DNS servers` are locked rows (chosen
+  earlier). `CapturesFolder.cs` moves the Captures/Screenshots known folders via `SHSetKnownFolderPath`
+  with undo lines written first. New screens live in `MainForm.Sections.cs`.
 - **Windows cleanup (1.7.0)**: `CleanupTweaks.cs` holds a data-driven list (`CleanupCatalog.All`, max 9 - picked
   with keys 1-9) of per-user HKCU DWORD settings; wizard phase `ChooseCleanup` (after DNS, before debloat),
   applied by `InstallerEngine.ApplyCleanup` only after the ConfirmTweaks yes + FinalReview GO, with undo lines

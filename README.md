@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 ![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-blue)
 ![.NET](https://img.shields.io/badge/.NET-8.0-purple)
-[![Version](https://img.shields.io/badge/version-1.7.0-brightgreen.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.8.0-brightgreen.svg)](CHANGELOG.md)
 [![Release](https://img.shields.io/github/v/release/morpheus2n2/GamingStack)](https://github.com/morpheus2n2/GamingStack/releases)
 [![Security](https://img.shields.io/badge/security-scan%20results-informational)](SECURITY.md)
 
@@ -59,9 +59,9 @@ getting there interesting, and gives you a reason to open it again afterwards.
 |---|---|
 | 1. Intro | Fake BIOS (real hardware info) > retro boot screen > the desktop. SPACE skips it. |
 | 2. Choose a setup type | Gaming, Office or Developer. Or `R` to repeat your last setup. |
-| 3. Choose apps | Everything shown, or go through one by one. |
+| 3. Choose apps | You say which graphics card and processor you have (so AMD tools are hidden on an NVIDIA PC, and so on), see the full list, then tick what you want **one section at a time**. A review screen lists everything you picked and asks "Are you sure?" before anything else happens. |
 | 4. Safety net | A restore point is always made. Optionally a full disk-image backup too. |
-| 5. Windows tweaks | Each tweak is listed with its **real current value** and what it would become. You say yes or no. Optional DNS switch and app removal. |
+| 5. Windows tweaks | Each tweak is on a tick list with its **real current value** and what it would become - untick any you don't want. Optional extras: DNS switch, move your Captures folder, Windows cleanup, app removal. |
 | 6. **Final check** | One screen with everything that is about to happen. Type `GO` + Enter to start, or `N` to back out. |
 | 7. Install | Live progress, current app, and `C` to stop after the current item. |
 | 8. Summary | What was installed, opened in your browser, skipped or failed - plus where the log, build sheet and undo script are. |
@@ -112,6 +112,11 @@ parking off, foreground-app priority boost.
 preinstalled Store apps (News, Weather, Clipchamp, Solitaire, Teams, the Office hub, TikTok,
 Disney+, Spotify) - only the ones actually on your PC, none ticked by default, and the undo script
 reinstalls them from the Store.
+
+**Captures folder (optional, Gaming):** Xbox Game Bar clips normally go to your Videos folder and
+screenshots to Pictures - often inside OneDrive. You can pick another folder or drive (it suggests a
+`Captures` folder on each of your drives with the free space shown, or browse). Only where *new* clips go
+changes; nothing is moved or deleted, and the undo script restores the old folders.
 
 **Windows cleanup (optional extra, nothing ticked by default):** nine small settings for *your* user
 only, each shown with what it does and its current value - End Task on the taskbar, no web results in
@@ -180,7 +185,7 @@ dotnet publish -c Release -r win-x64        # one self-contained GamingStackGUI.
 ```
 
 Needs the [.NET 8 SDK](https://dotnet.microsoft.com/download) on Windows. The published exe is in
-`bin/Release/net8.0-windows/win-x64/publish/`. Tagging a version (`v1.7.0`) builds and attaches the
+`bin/Release/net8.0-windows/win-x64/publish/`. Tagging a version (`v1.8.0`) builds and attaches the
 exe to a GitHub Release automatically. `python tools/gen-catalog.py` regenerates the catalog page.
 
 Project rules and architecture notes are in [CLAUDE.md](CLAUDE.md) - read it before changing

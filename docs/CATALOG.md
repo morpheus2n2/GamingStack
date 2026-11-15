@@ -6,7 +6,7 @@ selection screens. "winget" entries install silently through Windows' own packag
 "opens" entries have no winget package, so GamingStack just opens the vendor's own download page
 in your default browser and you install from there.
 
-## Gaming (95 items)
+## Gaming (135 items)
 
 ### Web Browsers
 
@@ -52,7 +52,10 @@ in your default browser and you install from there.
 
 | App | How it installs |
 |---|---|
-| NVIDIA App | winget `Nvidia.App` |
+| NVIDIA App (drivers, game settings, recording - opens page) | opens [www.nvidia.com](https://www.nvidia.com/en-us/software/nvidia-app/) |
+| NVIDIA Profile Inspector (advanced driver settings) | winget `Orbmu2k.nvidiaProfileInspector` |
+| NVCleanstall (choose which parts of an NVIDIA driver to install) | winget `TechPowerUp.NVCleanstall` |
+| NVIDIA Broadcast (AI mic noise removal + camera effects, opens page) | opens [www.nvidia.com](https://www.nvidia.com/en-us/geforce/broadcasting/broadcast-app/) |
 | Display Driver Uninstaller (clean GPU driver swaps) | winget `Wagnardsoft.DisplayDriverUninstaller` |
 | HWiNFO | winget `REALiX.HWiNFO` |
 | CPU-Z | winget `CPUID.CPU-Z` |
@@ -66,7 +69,12 @@ in your default browser and you install from there.
 | Process Lasso | winget `BitSum.ProcessLasso` |
 | LibreHardwareMonitor (open-source sensors) | winget `LibreHardwareMonitor.LibreHardwareMonitor` |
 | RivaTuner Statistics Server (FPS overlay engine) | winget `Guru3D.RTSS` |
-| Microsoft PC Manager | winget `Microsoft.PCManager` |
+| CrystalDiskMark (drive speed test) | winget `CrystalDewWorld.CrystalDiskMark` |
+| FurMark (GPU stress test) | winget `Geeks3D.FurMark.2` |
+| HWMonitor (temperatures and voltages) | winget `CPUID.HWMonitor` |
+| Core Temp (CPU temperature) | winget `ALCPU.CoreTemp` |
+| ThrottleStop (Intel CPU throttling control) | winget `TechPowerUp.ThrottleStop` |
+| Microsoft PC Manager (opens page) | opens [pcmanager.microsoft.com](https://pcmanager.microsoft.com/) |
 | Razer Cortex | direct download (page: [www.razer.com](https://www.razer.com/cortex)) |
 
 ### Streaming & Recording
@@ -74,14 +82,20 @@ in your default browser and you install from there.
 | App | How it installs |
 |---|---|
 | OBS Studio | winget `OBSProject.OBSStudio` |
-| Streamlabs Desktop | winget `Streamlabs.StreamlabsOBS` |
-| Medal.tv | winget `Medal.Medal` |
+| Streamlabs Desktop | winget `Streamlabs.Streamlabs` |
+| Medal.tv | winget `MedalB.V.Medal` |
 | Voicemeeter Banana | winget `VB-Audio.Voicemeeter.Banana` |
 | Elgato Stream Deck | winget `Elgato.StreamDeck` |
 | Elgato Wave Link | winget `Elgato.WaveLink` |
 | Sunshine (stream games to Moonlight) | winget `LizardByte.Sunshine` |
 | Moonlight (play streamed PC games) | winget `MoonlightGameStreamingProject.Moonlight` |
 | Parsec (low-latency remote play) | winget `Parsec.Parsec` |
+| Elgato 4K Capture Utility (capture cards) | winget `Elgato.4KCaptureUtility` |
+| Elgato Camera Hub (webcam settings) | winget `Elgato.CameraHub` |
+| Elgato Control Center (Key Light) | winget `Elgato.ControlCenter` |
+| Streamer.bot (stream chat and alert automation) | winget `streamerbot.streamerbot` |
+| Voicemod (live voice changer, opens page) | opens [www.voicemod.net](https://www.voicemod.net/) |
+| VB-Cable (virtual audio cable, opens page) | opens [vb-audio.com](https://vb-audio.com/Cable/) |
 | Voicemeeter Potato (advanced audio mixer) | winget `VB-Audio.Voicemeeter.Potato` |
 
 ### General Utilities
@@ -90,7 +104,7 @@ in your default browser and you install from there.
 |---|---|
 | VS Code | winget `Microsoft.VisualStudioCode` |
 | PowerShell 7 | winget `Microsoft.PowerShell` |
-| Python 3 | winget `Python.Python.3` |
+| Python 3 | winget `Python.Python.3.13` |
 | PowerToys | winget `Microsoft.PowerToys` |
 | VLC Media Player | winget `VideoLAN.VLC` |
 | 7-Zip | winget `7zip.7zip` |
@@ -126,6 +140,10 @@ in your default browser and you install from there.
 | Rainmeter (desktop widgets) | winget `Rainmeter.Rainmeter` |
 | Lively Wallpaper (animated wallpapers) | winget `rocksdanister.LivelyWallpaper` |
 | Mod Organizer 2 | winget `ModOrganizer2.modorganizer` |
+| ReShade (post-processing filters for games) | winget `Reshade.Setup` |
+| Special K (frame pacing, HDR and game fixes) | winget `SpecialK.SpecialK` |
+| Overwolf (in-game overlay apps, opens page) | opens [www.overwolf.com](https://www.overwolf.com/) |
+| Lossless Scaling (frame generation, opens its Steam page) | opens [store.steampowered.com](https://store.steampowered.com/app/993090/Lossless_Scaling/) |
 
 ### Redistributables
 
@@ -134,6 +152,16 @@ in your default browser and you install from there.
 | VC++ Redistributables Pack (all versions) | winget bundle |
 | .NET Desktop Runtimes (8 + 9) | winget bundle |
 | DirectX End-User Runtime (older game DLLs) | winget `Microsoft.DirectX` |
+
+### Uninstall & Clean-up Tools
+
+| App | How it installs |
+|---|---|
+| Bulk Crap Uninstaller (deep uninstaller, finds leftovers) | winget `Klocman.BulkCrapUninstaller` |
+| Revo Uninstaller Free (deep uninstaller) | winget `RevoUninstaller.RevoUninstaller` |
+| Geek Uninstaller (small, fast uninstaller) | winget `GeekUninstaller.GeekUninstaller` |
+| BleachBit (clears junk and temporary files) | winget `BleachBit.BleachBit` |
+| WinDirStat (what is filling your drive) | winget `WinDirStat.WinDirStat` |
 
 ### RGB & Peripheral Control
 
@@ -145,6 +173,8 @@ in your default browser and you install from there.
 | SteelSeries GG | winget `SteelSeries.GG` |
 | OpenRGB (universal, multi-vendor) | winget `OpenRGB.OpenRGB` |
 | SignalRGB (universal, multi-vendor) | winget `WhirlwindFX.SignalRgb` |
+| NZXT CAM (NZXT cooling + lighting control) | winget `NZXT.CAM` |
+| Logitech Options+ (MX mice and keyboards) | winget `Logitech.OptionsPlus` |
 | Hyte Nexus (HYTE case/AIO control) | direct download (page: [hyte.com](https://hyte.com/)) |
 | L-Connect 3 (Lian Li fan/lighting control) | direct download (page: [lian-li.com](https://lian-li.com/l-connect3/)) |
 
@@ -158,11 +188,31 @@ in your default browser and you install from there.
 | DOSBox-X (old DOS games) | winget `joncampbell123.DOSBox-X` |
 | ScummVM (classic point-and-click adventures) | winget `ScummVM.ScummVM` |
 
+### Console Emulators (bring your own games)
+
+| App | How it installs |
+|---|---|
+| Dolphin (GameCube and Wii) | winget `DolphinEmulator.Dolphin` |
+| DuckStation (PlayStation 1) | winget `Stenzek.DuckStation` |
+| PPSSPP (PlayStation Portable) | winget `PPSSPPTeam.PPSSPP` |
+| Cemu (Wii U) | winget `Cemu.Cemu` |
+| melonDS (Nintendo DS) | winget `melonDS.melonDS` |
+| Azahar (Nintendo 3DS) | winget `AzaharEmu.Azahar` |
+| mGBA (Game Boy, Game Boy Color, Game Boy Advance) | winget `JeffreyPfau.mGBA` |
+| xemu (original Xbox) | winget `xemu-project.xemu` |
+| MAME (arcade machines) | winget `MAMEdev.MAME` |
+| RPCS3 (PlayStation 3, opens download page) | opens [rpcs3.net](https://rpcs3.net/download) |
+| Flycast (Dreamcast and Naomi, opens download page) | opens [github.com](https://github.com/flyinghead/flycast/releases) |
+| EmulationStation Desktop Edition (one front-end for all your emulators) | winget `ES-DE.EmulationStation-DE` |
+| LaunchBox (game library front-end, opens download page) | opens [www.launchbox-app.com](https://www.launchbox-app.com/download) |
+
 ### Drivers & Vendor Software
 
 | App | How it installs |
 |---|---|
 | AMD Software: Adrenalin (opens download page) | opens [www.amd.com](https://www.amd.com/en/support/download/drivers.html) |
+| AMD Ryzen Master (Ryzen tuning, opens download page) | opens [www.amd.com](https://www.amd.com/en/products/software/ryzen-master.html) |
+| AMD Chipset Drivers (Ryzen motherboards, opens download page) | opens [www.amd.com](https://www.amd.com/en/support/download/drivers.html) |
 | Intel Driver & Support Assistant (opens page) | opens [www.intel.com](https://www.intel.com/content/www/us/en/support/detect.html) |
 | MSI Center (opens download page) | opens [www.msi.com](https://www.msi.com/Landing/MSI-Center) |
 | ASUS Armoury Crate (opens download page) | opens [rog.asus.com](https://rog.asus.com/armoury-crate/) |
@@ -178,7 +228,7 @@ in your default browser and you install from there.
 | LM Studio (run open AI models locally) | winget `ElementLabs.LMStudio` |
 | Ollama (run open AI models locally) | winget `Ollama.Ollama` |
 
-## Office (46 items)
+## Office (56 items)
 
 ### Web Browsers
 
@@ -210,6 +260,10 @@ in your default browser and you install from there.
 | Obsidian (notes) | winget `Obsidian.Obsidian` |
 | Google Drive | winget `Google.GoogleDrive` |
 | Foxit PDF Reader | winget `Foxit.FoxitReader` |
+| ONLYOFFICE Desktop Editors (free Office-style suite) | winget `ONLYOFFICE.DesktopEditors` |
+| Greenshot (quick screenshots with markup) | winget `Greenshot.Greenshot` |
+| KeePassXC (offline password manager) | winget `KeePassXCTeam.KeePassXC` |
+| Joplin (notes that sync anywhere) | winget `Joplin.Joplin` |
 | PDFgear (free PDF editor) | winget `PDFgear.PDFgear` |
 | SumatraPDF (fast, light PDF reader) | winget `SumatraPDF.SumatraPDF` |
 | Notion (notes + docs) | winget `Notion.Notion` |
@@ -263,6 +317,22 @@ in your default browser and you install from there.
 | VC++ Redistributables Pack (all versions) | winget bundle |
 | .NET Desktop Runtimes (8 + 9) | winget bundle |
 
+### Uninstall & Clean-up Tools
+
+| App | How it installs |
+|---|---|
+| Bulk Crap Uninstaller (deep uninstaller, finds leftovers) | winget `Klocman.BulkCrapUninstaller` |
+| Revo Uninstaller Free (deep uninstaller) | winget `RevoUninstaller.RevoUninstaller` |
+| Geek Uninstaller (small, fast uninstaller) | winget `GeekUninstaller.GeekUninstaller` |
+| BleachBit (clears junk and temporary files) | winget `BleachBit.BleachBit` |
+| WinDirStat (what is filling your drive) | winget `WinDirStat.WinDirStat` |
+
+### RGB & Peripheral Control
+
+| App | How it installs |
+|---|---|
+| Logitech Options+ (MX mice and keyboards) | winget `Logitech.OptionsPlus` |
+
 ### Drivers & Vendor Software
 
 | App | How it installs |
@@ -276,7 +346,7 @@ in your default browser and you install from there.
 | Claude | winget `Anthropic.Claude` |
 | ChatGPT | winget `9NT1R1C2HH7J` |
 
-## Developer (81 items)
+## Developer (99 items)
 
 ### Web Browsers
 
@@ -299,6 +369,8 @@ in your default browser and you install from there.
 |---|---|
 | Notepad++ | winget `Notepad++.Notepad++` |
 | Obsidian (notes) | winget `Obsidian.Obsidian` |
+| KeePassXC (offline password manager) | winget `KeePassXCTeam.KeePassXC` |
+| Joplin (notes that sync anywhere) | winget `Joplin.Joplin` |
 
 ### Cloud & Sync
 
@@ -325,6 +397,11 @@ in your default browser and you install from there.
 | MobaXterm (SSH + remote tools) | winget `Mobatek.MobaXterm` |
 | CMake | winget `Kitware.CMake` |
 | Visual Studio 2022 Build Tools (C++/.NET compilers) | winget `Microsoft.VisualStudio.2022.BuildTools` |
+| Zed (fast code editor) | winget `ZedIndustries.Zed` |
+| Cursor (AI code editor) | winget `Anysphere.Cursor` |
+| Bruno (offline API client) | winget `Bruno.Bruno` |
+| HxD (hex editor) | winget `MHNexus.HxD` |
+| Android Studio | winget `Google.AndroidStudio` |
 
 ### Command-line Tools
 
@@ -353,6 +430,9 @@ in your default browser and you install from there.
 | Go | winget `GoLang.Go` |
 | Rust (rustup) | winget `Rustlang.Rustup` |
 | Java 21 (Temurin JDK) | winget `EclipseAdoptium.Temurin.21.JDK` |
+| Deno (JavaScript/TypeScript runtime) | winget `DenoLand.Deno` |
+| Bun (fast JavaScript runtime) | winget `Oven-sh.Bun` |
+| uv (fast Python package manager) | winget `astral-sh.uv` |
 | .NET SDK 9 | winget `Microsoft.DotNet.SDK.9` |
 
 ### Containers & Cloud
@@ -369,6 +449,7 @@ in your default browser and you install from there.
 | Bicep (Azure infrastructure) | winget `Microsoft.Bicep` |
 | Vagrant | winget `Hashicorp.Vagrant` |
 | Ubuntu 24.04 for WSL | winget `Canonical.Ubuntu.2404` |
+| Podman Desktop (containers without Docker) | winget `RedHat.Podman-Desktop` |
 
 ### Home Lab & Network
 
@@ -386,6 +467,8 @@ in your default browser and you install from there.
 | WireGuard (VPN) | winget `WireGuard.WireGuard` |
 | Nmap (network scanner) | winget `Insecure.Nmap` |
 | Advanced IP Scanner | winget `Famatech.AdvancedIPScanner` |
+| Angry IP Scanner | winget `angryziber.AngryIPScanner` |
+| Syncthing (private file sync) | winget `Syncthing.Syncthing` |
 
 ### General Utilities
 
@@ -393,7 +476,7 @@ in your default browser and you install from there.
 |---|---|
 | VS Code | winget `Microsoft.VisualStudioCode` |
 | PowerShell 7 | winget `Microsoft.PowerShell` |
-| Python 3 | winget `Python.Python.3` |
+| Python 3 | winget `Python.Python.3.13` |
 | PowerToys | winget `Microsoft.PowerToys` |
 | VLC Media Player | winget `VideoLAN.VLC` |
 | 7-Zip | winget `7zip.7zip` |
@@ -418,6 +501,16 @@ in your default browser and you install from there.
 | VC++ Redistributables Pack (all versions) | winget bundle |
 | .NET Desktop Runtimes (8 + 9) | winget bundle |
 
+### Uninstall & Clean-up Tools
+
+| App | How it installs |
+|---|---|
+| Bulk Crap Uninstaller (deep uninstaller, finds leftovers) | winget `Klocman.BulkCrapUninstaller` |
+| Revo Uninstaller Free (deep uninstaller) | winget `RevoUninstaller.RevoUninstaller` |
+| Geek Uninstaller (small, fast uninstaller) | winget `GeekUninstaller.GeekUninstaller` |
+| BleachBit (clears junk and temporary files) | winget `BleachBit.BleachBit` |
+| WinDirStat (what is filling your drive) | winget `WinDirStat.WinDirStat` |
+
 ### Drivers & Vendor Software
 
 | App | How it installs |
@@ -435,4 +528,4 @@ in your default browser and you install from there.
 | Ollama (run open AI models locally) | winget `Ollama.Ollama` |
 
 ---
-_168 entries in total. Some appear in more than one setup type._
+_223 entries in total. Some appear in more than one setup type._

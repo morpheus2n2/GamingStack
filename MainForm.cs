@@ -20,10 +20,12 @@ namespace GamingStackGUI
         private enum WizardPhase
         {
             ChooseProfile,       // "[1] Gaming [2] Office [3] Developer" - the very first screen
-            ConfirmAll,          // "Install everything shown? Y/N"
-            ChooseIndividually,  // "Want to choose what's installed? Y/N"
-            PerApp,              // asking Y/N for one catalog entry at a time
-            ConfirmQuit,         // "Just want to quit? Y/N"
+            ChooseHardware,      // which makers you have (NVIDIA / AMD / Intel) - hides apps for the others
+            ConfirmAll,          // the full list for this setup type, then "Start the guided setup? Y/N"
+            PickSection,         // one page per section (category): tick what you want
+            ReviewSelection,     // everything picked, then "Are you sure?" before anything else happens
+            ChooseCaptures,      // optional: move the Captures (Game Bar) and Screenshots folders
+            ConfirmQuit,        // "Just want to quit? Y/N"
             EasterEgg,           // declined everything - a little joke, then Farewell
             ConfirmBackup,       // "Full disk-image backup: before / after / skip?" -
                                  // shown once app selection is finalized, before
@@ -117,8 +119,6 @@ namespace GamingStackGUI
         // Stopwatch time at which the app list starts typing (reset when a profile is chosen).
         private long _typingStartMs = TerminalOpenMs;
         private readonly List<AppEntry> _selectedApps = new();
-        private int _perAppIndex;
-        private bool?[] _perAppDecisions = Array.Empty<bool?>();
 
         // ---- tweak consent (ConfirmTweaks phase) ----
         // Populated from InstallerEngine.PreviewTweaks() right before showing the
@@ -143,7 +143,8 @@ namespace GamingStackGUI
         private IReadOnlyList<CleanupItem> _cleanupOffered = Array.Empty<CleanupItem>();
         private readonly HashSet<string> _cleanupTicked = new();
         private TweakOptions CurrentTweakOptions =>
-            new(_powerPlanChoice, _dnsChoice, _debloatTicked.ToList(), _profile, _cleanupTicked.ToList());
+            new(_powerPlanChoice, _dnsChoice, _debloatTicked.ToList(), _profile, _cleanupTicked.ToList(),
+                _tweakOff.ToList(), _capturesPath);
 
         // ---- restore point + optional full image backup ----
         // The restore point always runs, no consent screen needed for it (see

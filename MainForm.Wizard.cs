@@ -16,6 +16,8 @@ namespace GamingStackGUI
         // this screen being shown first.
         private void GoToConfirmTweaks()
         {
+            _tweakOff.Clear();
+            _tweakCursor = 0; _tweakScroll = 0;
             _tweakPreview = InstallerEngine.PreviewTweaks(CurrentTweakOptions);
             // Ticked debloat items are shown on the consent screen too, so nothing is
             // removed that isn't listed right before the final yes/no.
@@ -237,10 +239,16 @@ namespace GamingStackGUI
                         3 => DnsChoice.Quad9,
                         _ => DnsChoice.Skip
                     };
-                    GoToChooseCleanupOrNext();
+                    GoToChooseCapturesOrNext();
                 }
                 return;
             }
+
+            if (_wizardPhase == WizardPhase.ChooseHardware) { HandleChooseHardwareKey(key); return; }
+            if (_wizardPhase == WizardPhase.PickSection) { HandlePickSectionKey(key); return; }
+            if (_wizardPhase == WizardPhase.ReviewSelection) { HandleReviewKey(key); return; }
+            if (_wizardPhase == WizardPhase.ChooseCaptures) { HandleCapturesKey(key); return; }
+            if (_wizardPhase == WizardPhase.ConfirmTweaks) { HandleTweakKey(key); return; }
 
             if (_wizardPhase == WizardPhase.ChooseCleanup)
             {
@@ -308,45 +316,9 @@ namespace GamingStackGUI
             switch (_wizardPhase)
             {
                 case WizardPhase.ConfirmAll:
-                    if (answer)
-                    {
-                        _selectedApps.Clear();
-                        _selectedApps.AddRange(_catalog);
-                        UnlockAchievement("completionist");
-                        GoToConfirmBackup();
-                    }
-                    else
-                    {
-                        _wizardPhase = WizardPhase.ChooseIndividually;
-                    }
-                    break;
-
-                case WizardPhase.ChooseIndividually:
-                    if (answer)
-                    {
-                        _selectedApps.Clear();
-                        _perAppIndex = 0;
-                        _perAppDecisions = new bool?[_catalog.Count];
-                        _wizardPhase = WizardPhase.PerApp;
-                    }
-                    else
-                    {
-                        _wizardPhase = WizardPhase.ConfirmQuit;
-                    }
-                    break;
-
-                case WizardPhase.PerApp:
-                    _perAppDecisions[_perAppIndex] = answer;
-                    if (answer) _selectedApps.Add(_catalog[_perAppIndex]);
-                    _perAppIndex++;
-                    if (_perAppIndex >= _catalog.Count)
-                        GoToConfirmBackup();
-                    break;
-
-                case WizardPhase.ConfirmTweaks:
-                    _applyTweaks = answer;
-                    _finalTyped = "";
-                    _wizardPhase = WizardPhase.FinalReview;
+                    // Yes starts the guided, section-by-section setup (nothing is installed by saying yes here).
+                    if (answer) StartSections();
+                    else _wizardPhase = WizardPhase.ConfirmQuit;
                     break;
 
                 case WizardPhase.ConfirmQuit:
@@ -395,6 +367,18 @@ namespace GamingStackGUI
                     break;
                 case WizardPhase.ChooseDns:
                     DrawChooseDns(g, fullX, fullY, fullW, fullH, titleHeight);
+                    break;
+                case WizardPhase.ChooseHardware:
+                    DrawChooseHardware(g, fullX, fullY, fullW, fullH, titleHeight);
+                    break;
+                case WizardPhase.PickSection:
+                    DrawPickSection(g, fullX, fullY, fullW, fullH, titleHeight);
+                    break;
+                case WizardPhase.ReviewSelection:
+                    DrawReview(g, fullX, fullY, fullW, fullH, titleHeight);
+                    break;
+                case WizardPhase.ChooseCaptures:
+                    DrawChooseCaptures(g, fullX, fullY, fullW, fullH, titleHeight);
                     break;
                 case WizardPhase.ChooseCleanup:
                     DrawChooseCleanup(g, fullX, fullY, fullW, fullH, titleHeight);
@@ -450,8 +434,7 @@ namespace GamingStackGUI
         private int? _wizardTotalCharsCache;
 
         private static bool IsWizardTypingPhase(WizardPhase phase) => phase is
-            WizardPhase.ConfirmAll or WizardPhase.ChooseIndividually or
-            WizardPhase.PerApp or WizardPhase.ConfirmQuit;
+            WizardPhase.ConfirmAll or WizardPhase.ConfirmQuit;
 
         // Total character count of the wizard's app list, for pacing the typewriter
         // reveal/tick sound. This is deterministic from the catalog alone - the marker
@@ -724,14 +707,14 @@ namespace GamingStackGUI
             _profile = profile;
             _catalog = InstallerEngine.CatalogFor(profile);
             _selectedApps.Clear();
-            _perAppDecisions = Array.Empty<bool?>();
-            _perAppIndex = 0;
-            _wizardColumns = null;
-            _wizardTotalCharsCache = null;
-            _wizardCharsRevealed = 0;
-            _typewriterBellRung = false;
-            _typingStartMs = _stageWatch.ElapsedMilliseconds + 250;
-            _wizardPhase = WizardPhase.ConfirmAll;
+            _picked.Clear();
+            _tweakOff.Clear();
+            _capturesPath = null;
+
+            // Ask which hardware makers you have, but only if this setup type has maker-specific apps.
+            DetectHardware();
+            if (_catalog.Any(a => a.Hardware != HardwareTag.Any)) _wizardPhase = WizardPhase.ChooseHardware;
+            else ApplyHardwareAndShowList();
         }
 
         private void DrawChooseDns(Graphics g, int fullX, int fullY, int fullW, int fullH, int titleHeight)
@@ -859,42 +842,6 @@ namespace GamingStackGUI
             g.Clip = oldClip;
         }
 
-        private void DrawConfirmTweaks(Graphics g, int fullX, int fullY, int fullW, int fullH, int titleHeight)
-        {
-            var contentX = fullX + 16;
-            // Shrinks the line spacing on short windows so the list + the Y/N prompt
-            // always fit inside the box, instead of running off the bottom.
-            var rows = _tweakPreview.Count + 9;
-            var lineHeight = Math.Clamp((fullH - titleHeight - 30) / Math.Max(1, rows), 12, 18);
-
-            var headingTop = fullY + titleHeight + 10 + lineHeight;
-            g.DrawString("A few optional tweaks are recommended - nothing is applied without your OK:",
-                _monoSmall, Brushes.Gainsboro, contentX, headingTop);
-
-            var listTop = headingTop + lineHeight + 10;
-            var nameWidth = _tweakPreview.Count == 0
-                ? 0f
-                : _tweakPreview.Max(t => g.MeasureString(t.Name, _monoSmall).Width) + 24;
-
-            for (int i = 0; i < _tweakPreview.Count; i++)
-            {
-                var t = _tweakPreview[i];
-                var ly = listTop + i * lineHeight;
-                g.DrawString(t.Name, _monoSmall, Brushes.Gainsboro, contentX, ly);
-                g.DrawString($"currently: {t.Current}  ->  {t.NewValue}", _monoSmall, Brushes.Gold, contentX + nameWidth, ly);
-            }
-
-            var noteTop = listTop + _tweakPreview.Count * lineHeight + 14;
-            g.DrawString("Saying yes writes an undo script (revert-tweaks.cmd) before changing anything,",
-                _monoSmall, Brushes.DimGray, contentX, noteTop);
-            g.DrawString("so every change here can be put back exactly as it was.",
-                _monoSmall, Brushes.DimGray, contentX, noteTop + lineHeight);
-
-            var promptTop = noteTop + lineHeight * 2 + 16;
-            using var promptFont = Ui.Font(14f, FontStyle.Bold);
-            g.DrawString("Apply these tweaks?   [Y] Yes    [N] No, skip tweaks", promptFont, Brushes.Gold, contentX, promptTop);
-        }
-
         private void DrawWizard(Graphics g, int fullX, int fullY, int fullW, int fullH, int titleHeight)
         {
             var catalog = _catalog;
@@ -904,7 +851,7 @@ namespace GamingStackGUI
             // Dropped one extra line below the title bar so the heading doesn't sit
             // flush under it.
             var headingTop = fullY + titleHeight + 10 + headerLine;
-            g.DrawString($"GamingStack will install the following ({SetupProfileInfo.Title(_profile)}):",
+            g.DrawString($"Everything available for a {SetupProfileInfo.Title(_profile)} ({catalog.Count} apps) - nothing is installed yet:",
                 _mono, Brushes.Gainsboro, contentX, headingTop);
             var listTop = headingTop + headerLine + 8;
 
@@ -941,20 +888,8 @@ namespace GamingStackGUI
 
                     foreach (var i in indices)
                     {
-                        var marker = "   ";
+                        const string marker = "   ";
                         var brush = Brushes.Gainsboro;
-
-                        if (i < _perAppDecisions.Length && _perAppDecisions[i].HasValue)
-                        {
-                            var got = _perAppDecisions[i]!.Value;
-                            marker = got ? "[x]" : "[ ]";
-                            brush = got ? Brushes.LightGreen : Brushes.Gray;
-                        }
-                        else if (_wizardPhase == WizardPhase.PerApp && i == _perAppIndex)
-                        {
-                            marker = "-->";
-                            brush = Brushes.Gold;
-                        }
 
                         lines.Add(new WizardLine($"{marker} {catalog[i].FriendlyName}", rowFont, brush));
                     }
@@ -1018,9 +953,7 @@ namespace GamingStackGUI
             var promptTop = listTop + maxRowsUsed * lineHeight + 16;
             string prompt = _wizardPhase switch
             {
-                WizardPhase.ConfirmAll => "Install everything shown above?   [Y] Yes    [N] No",
-                WizardPhase.ChooseIndividually => "Would you like to choose what's installed?   [Y] Yes    [N] No",
-                WizardPhase.PerApp => $"Install \"{catalog[_perAppIndex].FriendlyName}\"?   [Y] Yes    [N] Skip",
+                WizardPhase.ConfirmAll => "Start the guided setup? You pick what you want section by section.   [Y] Yes    [N] No",
                 WizardPhase.ConfirmQuit => "No changes made yet. Just want to quit?   [Y] Yes    [N] No",
                 _ => ""
             };
@@ -1124,6 +1057,7 @@ namespace GamingStackGUI
             {
                 Line($"CHANGES TO WINDOWS: YES - {_tweakPreview.Count} settings change (you saw each one on the last screen)", Brushes.Orange, _mono);
                 if (_dnsChoice != DnsChoice.Skip) Line($"  Your network DNS servers will change to {_dnsChoice}.", Brushes.Gainsboro);
+                if (!string.IsNullOrWhiteSpace(_capturesPath)) Line($"  New game clips/screenshots will be saved under {_capturesPath} (nothing existing is moved or deleted).", Brushes.Gainsboro);
                 if (_cleanupTicked.Count > 0) Line($"  {_cleanupTicked.Count} optional Windows cleanup item(s) you ticked will be applied to your user settings.", Brushes.Gainsboro);
                 if (removals > 0) Line($"  {removals} preinstalled app(s) will be REMOVED (they can be reinstalled from the Store).", Brushes.OrangeRed);
                 Line("  An undo script is saved so every change can be reversed.", Brushes.Gainsboro);

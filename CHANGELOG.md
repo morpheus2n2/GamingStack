@@ -10,6 +10,37 @@ Everything below `0.6.2` predates versioning entirely, so those entries are
 backfilled from the original milestone-based changelog and given version
 numbers retroactively - there's no real date for them, only relative order.
 
+## [1.8.0] - Guided section-by-section setup, hardware filter, per-tweak choices, Captures folder, 70+ more apps
+
+### Added
+- **Hardware question**: you say which graphics card (NVIDIA / AMD / Intel) and processor (AMD Ryzen / Intel
+  Core) you have - detected and pre-ticked - and apps for hardware you don't have are hidden (no AMD graphics
+  software on an NVIDIA PC). Entries carry a `HardwareTag`.
+- **Guided setup replaces "install everything"**: the full list is shown first (nothing installs), then
+  "Start the guided setup?"; each section (category) gets its own page where you tick what you want
+  (arrows + SPACE, A all, N none), then a **review screen** lists everything picked and asks
+  "Are you sure?" before anything else happens. The old "Y = install all" shortcut is gone.
+- **Lighting/RGB programs are pick-one** (`ExclusiveGroup`): ticking one unticks the others, because they
+  fight over the same LEDs and are hard to remove. Apps that aren't lighting (Logitech Options+) are separate.
+- **Windows tweaks are a tick list**: every tweak is shown with its real current value and what it becomes and
+  can be switched off individually (`TweakOptions.DisabledTweaks`; each tweak in `ApplyTweaks` is gated).
+- **Captures folder** (Gaming): move the Windows Captures (Game Bar clips) and Screenshots known folders to a
+  folder or drive you pick (a `Captures` suggestion per drive with free space, or browse). Uses Windows'
+  own `SHSetKnownFolderPath`; nothing existing is moved or deleted; the undo script restores the old value
+  (`CapturesFolder.cs`). It warns when the current folder is inside OneDrive.
+- **Deep uninstallers** in a new "Uninstall & Clean-up Tools" section (every setup type): Bulk Crap
+  Uninstaller, Revo Uninstaller Free, Geek Uninstaller, plus BleachBit and WinDirStat.
+- **70+ new catalog entries**: 13 console emulators (Dolphin, DuckStation, PPSSPP, Cemu, melonDS, Azahar,
+  mGBA, xemu, MAME, RPCS3, Flycast, ES-DE, LaunchBox - bring your own games), Elgato apps, Streamer.bot,
+  Voicemod, VB-Cable, NZXT CAM, Logitech Options+, ReShade, Special K, Overwolf, Lossless Scaling, NVIDIA
+  Profile Inspector/NVCleanstall/Broadcast, AMD Ryzen Master and chipset drivers, ThrottleStop, more
+  benchmarks and monitors, and extras for the Office and Developer setups.
+
+### Fixed
+- Wrong winget IDs found by checking every catalog ID against winget again: **Medal.tv** (`Medal.Medal` never
+  existed; it is `MedalB.V.Medal`), Streamlabs Desktop (`Streamlabs.Streamlabs`), Python (`Python.Python.3.13`).
+  NVIDIA App and Microsoft PC Manager have no winget package, so they now open their download pages.
+
 ## [1.7.0] - Optional Windows cleanup screen
 
 ### Added

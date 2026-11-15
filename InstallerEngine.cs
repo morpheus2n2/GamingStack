@@ -70,8 +70,11 @@ namespace GamingStackGUI
         public SetupProfile Profiles { get; init; } = SetupProfile.Gaming;
         // Only offered when the user says they have this maker's hardware (see HardwareTag).
         public HardwareTag Hardware { get; init; } = HardwareTag.Any;
-        // Entries sharing an ExclusiveGroup are pick-one: ticking one unticks the others
-        // (used for RGB/lighting programs, which fight over the same LEDs and are hard to remove).
+        // Lighting programs only (RGB & Peripheral Control). "lighting-universal" (OpenRGB, SignalRGB) take over
+        // EVERY device, so ticking one unticks all other lighting programs and vice versa. "lighting-brand"
+        // (iCUE, Hyte Nexus, L-Connect...) each control their own maker's hardware: you may tick several
+        // for different devices you own (a Hyte case with Lian Li fans), with a warning that two apps
+        // controlling the SAME device will fight.
         public string? ExclusiveGroup { get; init; }
         // One short plain-words line shown under the entry while it is highlighted on a section page.
         public string? Note { get; init; }
@@ -409,21 +412,21 @@ namespace GamingStackGUI
             new() { FriendlyName = "WinDirStat (what is filling your drive)", Category = "Uninstall & Clean-up Tools", Kind = AppKind.Winget, WingetId = "WinDirStat.WinDirStat", Profiles = Everyone },
 
             // ---- RGB / peripheral ecosystems - manufacturer control software. The lighting
-            // programs (ExclusiveGroup = "lighting") are PICK-ONE: running several fights over the same
+            // programs (ExclusiveGroup = "lighting-brand") are PICK-ONE: running several fights over the same
             // LEDs and they are hard to remove cleanly. Nobody owns all of these, so they're skippable. OpenRGB and SignalRGB are the odd
             // ones out: single apps that talk to hardware from many vendors at once. ----
-            new() { FriendlyName = "Corsair iCUE", Category = "RGB & Peripheral Control", Kind = AppKind.Winget, WingetId = "Corsair.iCUE.4", ExclusiveGroup = "lighting" },
+            new() { FriendlyName = "Corsair iCUE", Category = "RGB & Peripheral Control", Kind = AppKind.Winget, WingetId = "Corsair.iCUE.4", ExclusiveGroup = "lighting-brand" },
             // Synapse 4 is the current version (the old "Razer.Synapse.3" ID doesn't exist).
-            new() { FriendlyName = "Razer Synapse", Category = "RGB & Peripheral Control", Kind = AppKind.Winget, WingetId = "RazerInc.RazerInstaller.Synapse4", ExclusiveGroup = "lighting" },
-            new() { FriendlyName = "Logitech G HUB", Category = "RGB & Peripheral Control", Kind = AppKind.Winget, WingetId = "Logitech.GHUB", ExclusiveGroup = "lighting" },
-            new() { FriendlyName = "SteelSeries GG", Category = "RGB & Peripheral Control", Kind = AppKind.Winget, WingetId = "SteelSeries.GG", ExclusiveGroup = "lighting" },
-            new() { FriendlyName = "OpenRGB (universal, multi-vendor)", Category = "RGB & Peripheral Control", Kind = AppKind.Winget, WingetId = "OpenRGB.OpenRGB", ExclusiveGroup = "lighting" },
-            new() { FriendlyName = "SignalRGB (universal, multi-vendor)", Category = "RGB & Peripheral Control", Kind = AppKind.Winget, WingetId = "WhirlwindFX.SignalRgb", ExclusiveGroup = "lighting" },
-            new() { FriendlyName = "NZXT CAM (NZXT cooling + lighting control)", Category = "RGB & Peripheral Control", Kind = AppKind.Winget, WingetId = "NZXT.CAM", Profiles = Gm, ExclusiveGroup = "lighting" },
+            new() { FriendlyName = "Razer Synapse", Category = "RGB & Peripheral Control", Kind = AppKind.Winget, WingetId = "RazerInc.RazerInstaller.Synapse4", ExclusiveGroup = "lighting-brand" },
+            new() { FriendlyName = "Logitech G HUB", Category = "RGB & Peripheral Control", Kind = AppKind.Winget, WingetId = "Logitech.GHUB", ExclusiveGroup = "lighting-brand" },
+            new() { FriendlyName = "SteelSeries GG", Category = "RGB & Peripheral Control", Kind = AppKind.Winget, WingetId = "SteelSeries.GG", ExclusiveGroup = "lighting-brand" },
+            new() { FriendlyName = "OpenRGB (universal, multi-vendor)", Category = "RGB & Peripheral Control", Kind = AppKind.Winget, WingetId = "OpenRGB.OpenRGB", ExclusiveGroup = "lighting-universal" },
+            new() { FriendlyName = "SignalRGB (universal, multi-vendor)", Category = "RGB & Peripheral Control", Kind = AppKind.Winget, WingetId = "WhirlwindFX.SignalRgb", ExclusiveGroup = "lighting-universal" },
+            new() { FriendlyName = "NZXT CAM (NZXT cooling + lighting control)", Category = "RGB & Peripheral Control", Kind = AppKind.Winget, WingetId = "NZXT.CAM", Profiles = Gm, ExclusiveGroup = "lighting-brand" },
             new() { FriendlyName = "Logitech Options+ (MX mice and keyboards)", Category = "RGB & Peripheral Control", Kind = AppKind.Winget, WingetId = "Logitech.OptionsPlus", Profiles = Gm | Of },
-            new() { FriendlyName = "Hyte Nexus (HYTE case/AIO control)", Category = "RGB & Peripheral Control", Kind = AppKind.Manual, ExclusiveGroup = "lighting",
+            new() { FriendlyName = "Hyte Nexus (HYTE case/AIO control)", Category = "RGB & Peripheral Control", Kind = AppKind.Manual, ExclusiveGroup = "lighting-brand",
                     ManualFileName = "HyteNexusInstaller.exe", ManualUrl = "https://hyte.co/nexus-download", PageUrl = "https://hyte.com/" },
-            new() { FriendlyName = "L-Connect 3 (Lian Li fan/lighting control)", Category = "RGB & Peripheral Control", Kind = AppKind.Manual, ExclusiveGroup = "lighting",
+            new() { FriendlyName = "L-Connect 3 (Lian Li fan/lighting control)", Category = "RGB & Peripheral Control", Kind = AppKind.Manual, ExclusiveGroup = "lighting-brand",
                     ManualFileName = "LConnect3.zip",
                     ManualUrl = "https://lianli-update-2025.lianli-cn.com/L3_CX/20260422-L-Connect%203-x64-v2.1.20-fde9a570.zip", PageUrl = "https://lian-li.com/l-connect3/" },
 

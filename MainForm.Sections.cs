@@ -143,16 +143,32 @@ namespace GamingStackGUI
             _wizardPhase = WizardPhase.PickSection;
         }
 
+        private const string LightingUniversal = "lighting-universal";
+        private const string LightingBrand = "lighting-brand";
+
         private void TogglePick(AppEntry item)
         {
             if (_picked.Remove(item)) { _secNotice = ""; return; }
             _picked.Add(item);
             _secNotice = "";
-            if (item.ExclusiveGroup == null) return;
-            var removed = _picked.Where(p => p != item && p.ExclusiveGroup == item.ExclusiveGroup).ToList();
-            foreach (var r in removed) _picked.Remove(r);
-            if (removed.Count > 0)
-                _secNotice = $"Only one lighting program at a time: \"{removed[0].FriendlyName}\" was unticked because they fight over the same LEDs.";
+
+            if (item.ExclusiveGroup == LightingUniversal)
+            {
+                // a universal tool takes over every device, so it can't live alongside any other lighting program
+                var removed = _picked.Where(p => p != item && p.ExclusiveGroup != null && p.ExclusiveGroup.StartsWith("lighting")).ToList();
+                foreach (var r in removed) _picked.Remove(r);
+                if (removed.Count > 0)
+                    _secNotice = $"{item.FriendlyName} controls every device itself, so the other lighting program(s) were unticked ({string.Join(", ", removed.Select(r => r.FriendlyName))}).";
+            }
+            else if (item.ExclusiveGroup == LightingBrand)
+            {
+                var removed = _picked.Where(p => p.ExclusiveGroup == LightingUniversal).ToList();
+                foreach (var r in removed) _picked.Remove(r);
+                if (removed.Count > 0)
+                    _secNotice = $"\"{removed[0].FriendlyName}\" was unticked: it controls every device itself and clashes with brand apps.";
+                else if (_picked.Count(p => p.ExclusiveGroup == LightingBrand) > 1)
+                    _secNotice = "Two or more lighting apps is fine if each controls DIFFERENT hardware you own (e.g. a Hyte case plus Lian Li fans). If two control the same device they fight - tick only the ones you need.";
+            }
         }
 
         private void HandlePickSectionKey(Keys key)
@@ -169,7 +185,7 @@ namespace GamingStackGUI
                 case Keys.Space: TogglePick(items[_secCursor]); break;
                 case Keys.A:
                     foreach (var i in items.Where(i => i.ExclusiveGroup == null)) _picked.Add(i);
-                    _secNotice = items.Any(i => i.ExclusiveGroup != null) ? "Lighting programs are pick-one, so \"all\" skips them - tick one with SPACE." : "";
+                    _secNotice = items.Any(i => i.ExclusiveGroup != null) ? "\"All\" skips lighting programs - tick only the ones for hardware you own with SPACE." : "";
                     break;
                 case Keys.N:
                     foreach (var i in items) _picked.Remove(i);
@@ -207,7 +223,7 @@ namespace GamingStackGUI
         private static string SectionNote(string category) => category switch
         {
             "RGB & Peripheral Control" =>
-                "Pick ONE lighting program. Several together fight over the same LEDs and are hard to remove afterwards, so ticking one unticks the others. Apps that are not about lighting (like Logitech Options+) can be ticked as well.",
+                "Only tick the lighting apps for hardware you actually own. You can use several brand apps together if they control different devices (e.g. Hyte Nexus for the case plus L-Connect for Lian Li fans), but two apps on the same device fight and are hard to remove. OpenRGB and SignalRGB control everything themselves, so they can't be combined with other lighting apps.",
             "Redistributables" =>
                 "Recommended for almost everyone: they stop \"missing .dll\" errors in games and apps.",
             "Console Emulators (bring your own games)" =>

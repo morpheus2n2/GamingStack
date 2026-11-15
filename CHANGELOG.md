@@ -20,8 +20,10 @@ numbers retroactively - there's no real date for them, only relative order.
   "Start the guided setup?"; each section (category) gets its own page where you tick what you want
   (arrows + SPACE, A all, N none), then a **review screen** lists everything picked and asks
   "Are you sure?" before anything else happens. The old "Y = install all" shortcut is gone.
-- **Lighting/RGB programs are pick-one** (`ExclusiveGroup`): ticking one unticks the others, because they
-  fight over the same LEDs and are hard to remove. Apps that aren't lighting (Logitech Options+) are separate.
+- **Lighting/RGB programs are guarded** (`ExclusiveGroup`): OpenRGB and SignalRGB control every device, so ticking one
+  unticks all other lighting programs (and vice versa). Brand apps (iCUE, Hyte Nexus, L-Connect, ...) can be combined for
+  different hardware you own (e.g. a Hyte case with Lian Li fans) with an on-screen warning that two apps on the same
+  device fight and are hard to remove. Apps that aren't lighting (Logitech Options+) are separate.
 - **Windows tweaks are a tick list**: every tweak is shown with its real current value and what it becomes and
   can be switched off individually (`TweakOptions.DisabledTweaks`; each tweak in `ApplyTweaks` is gated).
 - **Captures folder** (Gaming): move the Windows Captures (Game Bar clips) and Screenshots known folders to a

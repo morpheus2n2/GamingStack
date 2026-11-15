@@ -10,6 +10,20 @@ Everything below `0.6.2` predates versioning entirely, so those entries are
 backfilled from the original milestone-based changelog and given version
 numbers retroactively - there's no real date for them, only relative order.
 
+## [1.7.0] - Optional Windows cleanup screen
+
+### Added
+- **Windows cleanup** (new optional wizard screen, after DNS): nine small per-user Windows settings
+  (End Task on the taskbar, no web results in Start search, no lock-screen/Settings tips and ads, no
+  silently installed suggested apps, no "Finish setting up" nags, advertising ID and tailored experiences
+  off, Explorer opens to This PC, hide Task View). Each is shown with a plain-words effect and its real
+  current value; nothing is ticked by default; only settings that would actually change are offered; the
+  chosen ones appear on the "Apply these tweaks?" and final-check screens, are written to the log and
+  have undo lines in the undo script (`CleanupTweaks.cs`, `InstallerEngine.ApplyCleanup`).
+- Credit: the idea was inspired by the TBOK Windows Performance Optimizer by The Beard of Knowledge
+  (shown on the screen, the Credits scroll, the README and the wiki). That project has no licence, so
+  no code or text was copied - the settings are standard documented Windows settings, written from scratch.
+
 ## [1.6.1] - Automatic VirusTotal scan of releases, clearer notes on where files are saved
 
 ### Changed

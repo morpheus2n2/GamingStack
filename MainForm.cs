@@ -38,6 +38,8 @@ namespace GamingStackGUI
                                  // power plan tweak needs to know which one to preview
             ChooseDns,           // "[1] Keep mine [2] Cloudflare [3] Google [4] Quad9" -
                                  // optional DNS switch, defaults to leaving it alone
+            ChooseCleanup,       // optional Windows cleanup extras (ideas credited to TBOK); tick
+                                 // what you want. Skipped if nothing would change. Nothing ticked by default.
             ChooseDebloat,       // tick/untick preinstalled Store apps to remove; only
                                  // shown if the scan found any. Nothing ticked by default.
             Credits,             // short scrolling credits, between Summary and ShuttingDown
@@ -137,8 +139,11 @@ namespace GamingStackGUI
         // Starts empty (nothing is removed unless explicitly ticked).
         private IReadOnlyList<DebloatItem> _debloatOffered = Array.Empty<DebloatItem>();
         private readonly HashSet<string> _debloatTicked = new();
+        // Optional Windows cleanup extras: what would change on this PC, and what was ticked.
+        private IReadOnlyList<CleanupItem> _cleanupOffered = Array.Empty<CleanupItem>();
+        private readonly HashSet<string> _cleanupTicked = new();
         private TweakOptions CurrentTweakOptions =>
-            new(_powerPlanChoice, _dnsChoice, _debloatTicked.ToList(), _profile);
+            new(_powerPlanChoice, _dnsChoice, _debloatTicked.ToList(), _profile, _cleanupTicked.ToList());
 
         // ---- restore point + optional full image backup ----
         // The restore point always runs, no consent screen needed for it (see

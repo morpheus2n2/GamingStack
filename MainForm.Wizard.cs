@@ -19,6 +19,8 @@ namespace GamingStackGUI
             _tweakPreview = InstallerEngine.PreviewTweaks(CurrentTweakOptions);
             // Ticked debloat items are shown on the consent screen too, so nothing is
             // removed that isn't listed right before the final yes/no.
+            foreach (var item in _cleanupOffered.Where(c => _cleanupTicked.Contains(c.Id)))
+                _tweakPreview.Add(new InstallerEngine.TweakPreview($"Cleanup: {item.Name}", CleanupCatalog.DescribeCurrent(item), CleanupCatalog.DescribeNew(item)));
             foreach (var item in _debloatOffered.Where(d => _debloatTicked.Contains(d.Id)))
                 _tweakPreview.Add(new InstallerEngine.TweakPreview($"Remove app: {item.Name}", "installed", "removed (reinstallable)"));
             _wizardPhase = WizardPhase.ConfirmTweaks;
@@ -27,6 +29,16 @@ namespace GamingStackGUI
         private void GoToChooseDns()
         {
             _wizardPhase = WizardPhase.ChooseDns;
+        }
+
+        // Also a quick registry read: only settings that would actually change are offered,
+        // and the screen is skipped if there are none.
+        private void GoToChooseCleanupOrNext()
+        {
+            _cleanupTicked.Clear();
+            _cleanupOffered = CleanupCatalog.Scan();
+            if (_cleanupOffered.Count == 0) GoToChooseDebloatOrConfirm();
+            else _wizardPhase = WizardPhase.ChooseCleanup;
         }
 
         // Scan is a quick registry read. If nothing removable is installed the
@@ -225,7 +237,19 @@ namespace GamingStackGUI
                         3 => DnsChoice.Quad9,
                         _ => DnsChoice.Skip
                     };
-                    GoToChooseDebloatOrConfirm();
+                    GoToChooseCleanupOrNext();
+                }
+                return;
+            }
+
+            if (_wizardPhase == WizardPhase.ChooseCleanup)
+            {
+                if (key == Keys.Enter) { GoToChooseDebloatOrConfirm(); return; }
+                var index = DigitIndex(key);
+                if (index != null && index < _cleanupOffered.Count)
+                {
+                    var id = _cleanupOffered[index.Value].Id;
+                    if (!_cleanupTicked.Remove(id)) _cleanupTicked.Add(id);
                 }
                 return;
             }
@@ -371,6 +395,9 @@ namespace GamingStackGUI
                     break;
                 case WizardPhase.ChooseDns:
                     DrawChooseDns(g, fullX, fullY, fullW, fullH, titleHeight);
+                    break;
+                case WizardPhase.ChooseCleanup:
+                    DrawChooseCleanup(g, fullX, fullY, fullW, fullH, titleHeight);
                     break;
                 case WizardPhase.ChooseDebloat:
                     DrawChooseDebloat(g, fullX, fullY, fullW, fullH, titleHeight);
@@ -729,6 +756,49 @@ namespace GamingStackGUI
             g.DrawString("Choose 1, 2, 3 or 4", promptFont, Brushes.Gold, contentX, top + lineHeight * 2 + 16);
         }
 
+        // Optional extra: small per-user Windows settings, each explained in plain words,
+        // with what it is now. Nothing ticked by default. Ideas credited on screen to TBOK.
+        private void DrawChooseCleanup(Graphics g, int fullX, int fullY, int fullW, int fullH, int titleHeight)
+        {
+            var contentX = fullX + 16;
+            var textW = fullW - 52;
+            var top = fullY + titleHeight + 12;
+
+            // Measure first: use the smaller font if the full list would not fit the window.
+            var avail = fullH - titleHeight - 110;
+            Font rowFont = _monoSmall;
+            int Needed(Font f) => _cleanupOffered.Sum(i =>
+                (f.Height + 2) + WrapTextToWidth(g, i.Effect + " (now: " + CleanupCatalog.DescribeCurrent(i) + ")", f, textW - 40).Count * (f.Height + 1) + 6);
+            if (Needed(rowFont) > avail) rowFont = _monoTiny;
+
+            g.DrawString("Optional extra: Windows cleanup. Tick any small setting you want changed.", _monoSmall, Brushes.Gainsboro, contentX, top);
+            top += _monoSmall.Height + 8;
+
+            for (int i = 0; i < _cleanupOffered.Count; i++)
+            {
+                var item = _cleanupOffered[i];
+                var ticked = _cleanupTicked.Contains(item.Id);
+                g.DrawString($"[{i + 1}] [{(ticked ? "x" : " ")}] {item.Name}", rowFont, ticked ? Brushes.LimeGreen : Brushes.Gold, contentX, top);
+                top += rowFont.Height + 2;
+                foreach (var l in WrapTextToWidth(g, item.Effect + " (now: " + CleanupCatalog.DescribeCurrent(item) + ")", rowFont, textW - 40))
+                {
+                    g.DrawString(l, rowFont, Brushes.DimGray, contentX + 40, top);
+                    top += rowFont.Height + 1;
+                }
+                top += 6;
+            }
+
+            g.DrawString("Nothing is ticked by default. These only change YOUR user's settings; each old value is saved in the undo script.",
+                _monoTiny, Brushes.Gray, contentX, top);
+            top += _monoTiny.Height + 2;
+            g.DrawString("Ideas inspired by the TBOK Windows Performance Optimizer by The Beard of Knowledge (github.com/TheBeardofKnowledge/TBOK-Win11Optimizer).",
+                _monoTiny, Brushes.Gray, contentX, top);
+            top += _monoTiny.Height + 8;
+
+            using var promptFont = Ui.Font(14f, FontStyle.Bold);
+            g.DrawString("Press a number to tick/untick, ENTER when done", promptFont, Brushes.Gold, contentX, top);
+        }
+
         private void DrawChooseDebloat(Graphics g, int fullX, int fullY, int fullW, int fullH, int titleHeight)
         {
             var contentX = fullX + 16;
@@ -764,6 +834,7 @@ namespace GamingStackGUI
                 "Idea, taste and testing ........ Paul",
                 "Code and late-night typing ..... Claude",
                 "Installs ....................... winget",
+                "Cleanup ideas .................. TBOK Win Optimizer (credit)",
                 "Sound effects .................. one very patient speaker",
                 "",
                 "No Windows were harmed in the making of this program.",
@@ -1053,6 +1124,7 @@ namespace GamingStackGUI
             {
                 Line($"CHANGES TO WINDOWS: YES - {_tweakPreview.Count} settings change (you saw each one on the last screen)", Brushes.Orange, _mono);
                 if (_dnsChoice != DnsChoice.Skip) Line($"  Your network DNS servers will change to {_dnsChoice}.", Brushes.Gainsboro);
+                if (_cleanupTicked.Count > 0) Line($"  {_cleanupTicked.Count} optional Windows cleanup item(s) you ticked will be applied to your user settings.", Brushes.Gainsboro);
                 if (removals > 0) Line($"  {removals} preinstalled app(s) will be REMOVED (they can be reinstalled from the Store).", Brushes.OrangeRed);
                 Line("  An undo script is saved so every change can be reversed.", Brushes.Gainsboro);
             }

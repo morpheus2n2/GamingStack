@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 ![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-blue)
 ![.NET](https://img.shields.io/badge/.NET-8.0-purple)
-[![Version](https://img.shields.io/badge/version-1.6.1-brightgreen.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.7.0-brightgreen.svg)](CHANGELOG.md)
 [![Release](https://img.shields.io/github/v/release/morpheus2n2/GamingStack)](https://github.com/morpheus2n2/GamingStack/releases)
 [![Security](https://img.shields.io/badge/security-scan%20results-informational)](SECURITY.md)
 
@@ -113,6 +113,16 @@ preinstalled Store apps (News, Weather, Clipchamp, Solitaire, Teams, the Office 
 Disney+, Spotify) - only the ones actually on your PC, none ticked by default, and the undo script
 reinstalls them from the Store.
 
+**Windows cleanup (optional extra, nothing ticked by default):** nine small settings for *your* user
+only, each shown with what it does and its current value - End Task on the taskbar, no web results in
+Start search, no tips or ads on the lock screen or in Settings, no silently installed "suggested" apps,
+no "Finish setting up your PC" nags, advertising ID and tailored experiences off, File Explorer opens
+to This PC, Task View button hidden. Only settings that would actually change are offered. This idea
+was inspired by the [TBOK Windows Performance Optimizer](https://github.com/TheBeardofKnowledge/TBOK-Win11Optimizer)
+by The Beard of Knowledge; no code or text was copied (that project has no licence) - these are
+standard documented Windows settings, written from scratch. It deliberately does *not* touch services,
+all-users policies or built-in packages.
+
 ## Restore point and backup
 
 A System Restore point is **always** created before anything changes. GamingStack tries Windows'
@@ -170,7 +180,7 @@ dotnet publish -c Release -r win-x64        # one self-contained GamingStackGUI.
 ```
 
 Needs the [.NET 8 SDK](https://dotnet.microsoft.com/download) on Windows. The published exe is in
-`bin/Release/net8.0-windows/win-x64/publish/`. Tagging a version (`v1.6.1`) builds and attaches the
+`bin/Release/net8.0-windows/win-x64/publish/`. Tagging a version (`v1.7.0`) builds and attaches the
 exe to a GitHub Release automatically. `python tools/gen-catalog.py` regenerates the catalog page.
 
 Project rules and architecture notes are in [CLAUDE.md](CLAUDE.md) - read it before changing
@@ -200,6 +210,10 @@ wallpaper (AI-generated; it shows retro hardware that may carry real-world produ
 boot chime `Resources/win95.wav`. Their licensing is the owner's responsibility - replace them with
 your own if you redistribute this project. Windows is a trademark of Microsoft; all other product
 names belong to their owners.
+
+The optional Windows cleanup screen was inspired by the
+[TBOK Windows Performance Optimizer](https://github.com/TheBeardofKnowledge/TBOK-Win11Optimizer) by
+The Beard of Knowledge - thank you. Go and look at it, especially if you manage many PCs.
 
 Built by Paul ([@morpheus2n2](https://github.com/morpheus2n2)) with Claude.
 

@@ -12,7 +12,7 @@ maximum nostalgia.
 The project uses [Semantic Versioning](https://semver.org/), tracked in
 `GamingStackGUI.csproj` (`<Version>`/`<AssemblyVersion>`/`<FileVersion>`)
 and mirrored as a `## [x.y.z] - ...` heading at the top of `CHANGELOG.md`.
-The project is at **1.6.1**. Rules for bumping (they were written under
+The project is at **1.7.0**. Rules for bumping (they were written under
 `0.y.z` and still apply the same way):
 - **Bump the minor version** (`0.6.x` → `0.7.0`) for a change that adds a
   feature - a new wizard behavior, a new catalog category, a new stage.
@@ -210,6 +210,12 @@ the shell draws the chrome and calls `DrawClient`/`OnKey`/`OnTick`.
 - `MainForm` is split by topic: `MainForm.cs` (state, ctor, stage loop, keys), `.Intro.cs` (BIOS,
   boot, wallpaper), `.Wizard.cs` (flow + every wizard screen), `.Finale.cs` (summary and ending),
   `.Achievements.cs`, `.Shell.cs`, `.Apps.cs`, `.Tools.cs`.
+- **Windows cleanup (1.7.0)**: `CleanupTweaks.cs` holds a data-driven list (`CleanupCatalog.All`, max 9 - picked
+  with keys 1-9) of per-user HKCU DWORD settings; wizard phase `ChooseCleanup` (after DNS, before debloat),
+  applied by `InstallerEngine.ApplyCleanup` only after the ConfirmTweaks yes + FinalReview GO, with undo lines
+  written first. Inspired by the TBOK Windows Optimizer (The Beard of Knowledge) which has NO licence: never
+  copy its code or wording - add new items from Microsoft-documented settings only, and keep the credit.
+  Out of scope on purpose: services, all-users/default-profile edits, HKLM policies, package removal.
 - `tools/gen-catalog.py` regenerates `docs/CATALOG.md` from the catalog - run it when apps change.
 
 ## Copyright constraint - important

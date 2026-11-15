@@ -95,7 +95,8 @@ namespace GamingStackGUI
         InstallerEngine.PowerPlanChoice PowerPlan,
         DnsChoice Dns,
         IReadOnlyCollection<string> DebloatIds,
-        SetupProfile Profile = SetupProfile.Gaming);
+        SetupProfile Profile = SetupProfile.Gaming,
+        IReadOnlyCollection<string>? CleanupIds = null);
 
     /// <summary>
     /// One preinstalled app the opt-in debloat screen can offer to remove.
@@ -1372,6 +1373,11 @@ namespace GamingStackGUI
                 {
                     Log("Applying tweaks (you said yes to this)...");
                     ApplyTweaks(options);
+                    if (options.CleanupIds is { Count: > 0 })
+                    {
+                        Log("");
+                        ApplyCleanup(options.CleanupIds);
+                    }
                     if (options.DebloatIds.Count > 0)
                     {
                         Log("");
@@ -1407,6 +1413,46 @@ namespace GamingStackGUI
             }
         }
 
+        /// <summary>
+        /// The optional Windows cleanup items the user ticked (see <see cref="CleanupCatalog"/>).
+        /// Same pattern as every tweak: the previous value of each setting goes into the undo
+        /// script BEFORE it is changed, and every change is written to the log.
+        /// </summary>
+        private void ApplyCleanup(IReadOnlyCollection<string> ids)
+        {
+            var revert = EnsureRevert();
+            Log("[cleanup] Applying the Windows cleanup settings you ticked...");
+
+            foreach (var item in CleanupCatalog.All.Where(i => ids.Contains(i.Id)))
+            {
+                try
+                {
+                    revert.Add($"REM Cleanup: {item.Name}");
+                    foreach (var v in item.Values)
+                    {
+                        var existing = CleanupCatalog.ReadCurrent(v);
+                        revert.Add(existing == null
+                            ? $@"reg delete ""HKCU\{v.SubKey}"" /v {v.Name} /f"
+                            : $@"reg add ""HKCU\{v.SubKey}"" /v {v.Name} /t REG_DWORD /d {existing} /f");
+                    }
+                    revert.Add("");
+
+                    foreach (var v in item.Values)
+                    {
+                        var was = CleanupCatalog.ReadCurrent(v);
+                        using var key = Registry.CurrentUser.CreateSubKey(v.SubKey);
+                        key?.SetValue(v.Name, v.NewValue, RegistryValueKind.DWord);
+                        Log($"[cleanup] {item.Name}: {v.Name} = {v.NewValue} (was: {(was?.ToString() ?? "not set")})");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Fail($"Cleanup setting \"{item.Name}\" failed: {ex.Message}");
+                }
+            }
+            Log("[cleanup] Some of these take effect after you sign out and back in.");
+        }
+
         // The first lines of every log: enough to understand the whole run without the app.
         private string BuildLogHeader(IReadOnlyList<AppEntry> selected, bool applyTweaks, TweakOptions options, RunContext? context)
         {
@@ -1432,6 +1478,7 @@ namespace GamingStackGUI
             {
                 sb.AppendLine($"  power plan   {options.PowerPlan}");
                 sb.AppendLine($"  DNS          {options.Dns}");
+                sb.AppendLine($"  cleanup      {(options.CleanupIds is not { Count: > 0 } ? "none" : string.Join(", ", options.CleanupIds))}");
                 sb.AppendLine($"  removals     {(options.DebloatIds.Count == 0 ? "none" : string.Join(", ", options.DebloatIds))}");
             }
             sb.AppendLine($"Items          {selected.Count}");

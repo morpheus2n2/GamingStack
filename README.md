@@ -22,8 +22,13 @@ getting there interesting, and gives you a reason to open it again afterwards.
 
 ## Highlights
 
-- **Three setup types.** Pick Gaming, Office or Developer and get a matching app list (~95, ~46
-  and ~81 apps - see the [full catalog](docs/CATALOG.md)).
+- **Three setup types.** Pick Gaming, Office or Developer and get a matching app list (about 135, 56
+  and 99 apps - see the [full catalog](docs/CATALOG.md)).
+- **Guided, section by section.** You say which graphics card and processor you have (so AMD tools are hidden on
+  an NVIDIA PC), see the full list, then tick what you want one section at a time. A review screen asks
+  "Are you sure?" before anything happens. Lighting/RGB apps are guarded against clashing.
+- **Emulators, streaming tools and deep uninstallers** are all in the list (Dolphin, DuckStation, Medal.tv,
+  Elgato, Bulk Crap Uninstaller, Revo and more).
 - **You stay in control.** Nothing happens until you agree to it. A *final check* screen lists
   everything that is about to happen and needs you to type `GO`.
 - **Always a safety net.** A System Restore point is created first, every time. Optional full

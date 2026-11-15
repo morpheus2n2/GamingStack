@@ -12,7 +12,7 @@ clicks. An idea that can't do both is out of scope, however useful.
 
 ## Done so far (headline view)
 
-Three setup types (Gaming / Office / Developer) with ~170 catalog entries; fake BIOS with real
+Three setup types (Gaming / Office / Developer) with about 220 catalog entries, a guided section-by-section picker, a graphics/processor filter and a per-tweak tick list; fake BIOS with real
 hardware; 16/32-bit boot screens that follow the time of day; restore point + optional disk-image
 backup; disclosed, reversible tweaks with per-run undo scripts; optional DNS switch and app
 removal; a final-check screen; full run logs; a Stop button; download-page links for apps without a
